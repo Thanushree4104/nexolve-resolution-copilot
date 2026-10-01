@@ -1,0 +1,132 @@
+version: 1
+
+products:
+  - Nimbus Fibre        # home broadband
+  - Nimbus ONT-5G       # fibre terminal device
+  - Nimbus Mesh         # Wi-Fi mesh system
+  - Nimbus Mobile       # prepaid and postpaid mobile
+  - Nimbus TV Box       # set-top box
+
+classes:
+  - id: connectivity.intermittent
+    name: Intermittent connection
+    description: Internet connects but drops or becomes unstable at times.
+    products: [Nimbus Fibre, Nimbus ONT-5G]
+    root_causes:
+      - evening congestion on the shared node
+      - line noise or a degraded fibre connector
+      - firmware bug in the ONT
+      - Wi-Fi channel interference
+    examples:
+      - "Internet keeps dropping every night around 8."
+
+  - id: connectivity.outage
+    name: Complete outage
+    description: No internet at all.
+    products: [Nimbus Fibre, Nimbus ONT-5G]
+    root_causes:
+      - local node failure
+      - fibre cut
+      - provisioning error after plan change
+      - service suspended due to billing
+    examples:
+      - "No internet since morning, red light on the box."
+
+  - id: speed.degraded
+    name: Slow speeds
+    description: Connection works but speeds are well below the plan.
+    products: [Nimbus Fibre, Nimbus Mesh]
+    root_causes:
+      - fair-use throttling after data cap
+      - faulty splitter or cabling
+      - router too old for the plan speed
+      - heavy background usage on the home network
+    examples:
+      - "I pay for 300 Mbps but never get more than 20."
+
+  - id: wifi.coverage
+    name: Wi-Fi coverage
+    description: Weak or no Wi-Fi in parts of the home.
+    products: [Nimbus Mesh, Nimbus ONT-5G]
+    root_causes:
+      - router placement
+      - mesh node pairing lost
+      - device stuck on the 2.4 GHz band
+      - interference from neighbouring networks
+    examples:
+      - "Wi-Fi is dead in the bedroom."
+
+  - id: billing.dispute
+    name: Billing dispute
+    description: Customer questions a charge or invoice.
+    products: [Nimbus Fibre, Nimbus Mobile]
+    root_causes:
+      - proration error after plan change
+      - duplicate charge
+      - promotional discount expired
+      - late fee applied after payment delay
+    examples:
+      - "I was charged twice this month."
+
+  - id: account.provisioning
+    name: Activation and provisioning
+    description: New service, plan change or number port not completed.
+    products: [Nimbus Fibre, Nimbus Mobile]
+    root_causes:
+      - activation stuck in the queue
+      - wrong plan provisioned
+      - number port-in rejected
+      - installation appointment missed
+    examples:
+      - "My new connection was supposed to be active three days ago."
+
+  - id: device.hardware
+    name: Device fault
+    description: Router, ONT or other equipment appears faulty.
+    products: [Nimbus ONT-5G, Nimbus Mesh]
+    root_causes:
+      - ONT hardware fault
+      - router overheating
+      - power adapter failure
+      - damaged cable or port
+    examples:
+      - "The router keeps rebooting and feels very hot."
+
+  - id: voice.mobile
+    name: Mobile voice and data
+    description: Calls, SMS, mobile data or roaming problems.
+    products: [Nimbus Mobile]
+    root_causes:
+      - VoLTE not enabled on the SIM
+      - roaming not activated
+      - SIM activation incomplete
+      - weak coverage at the customer's location
+    examples:
+      - "I can't make calls indoors."
+
+  # Held back: switched on live in the demo to show new classes need no retraining.
+  - id: tv.streaming
+    name: TV and streaming
+    description: Set-top box, buffering or streaming app problems.
+    status: held_back
+    products: [Nimbus TV Box]
+    root_causes:
+      - set-top box needs a firmware update
+      - buffering caused by a weak line
+      - streaming app login failure
+      - remote not paired
+    examples:
+      - "My TV box freezes during movies."
+
+  - id: security.fraud
+    name: Security and fraud
+    description: Suspected SIM swap, account takeover or suspicious usage.
+    status: held_back
+    products: [Nimbus Mobile, Nimbus Fibre]
+    root_causes:
+      - SIM swap without the customer's consent
+      - unauthorized plan change
+      - suspicious roaming usage
+      - phishing message impersonating the operator
+    examples:
+      - "My phone lost signal and I got messages about a new SIM."
