@@ -1,0 +1,42 @@
+# --- Secrets (never commit) ---
+.env
+.env.*
+!.env.example
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- Notebooks ---
+.ipynb_checkpoints/
+
+# --- Local data, caches, stores (rebuilt by scripts) ---
+data/raw/
+.cache/
+llm_cache/
+qdrant_storage/
+*.sqlite
+*.db
+
+# --- Model weights (downloaded by scripts, never committed) ---
+models/
+*.bin
+*.safetensors
+
+# --- Logs ---
+*.log
+logs/
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
