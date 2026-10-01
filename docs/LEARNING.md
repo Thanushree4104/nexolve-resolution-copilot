@@ -53,9 +53,17 @@ A support assistant for telecom agents: the agent pastes a customer complaint in
 - **Gap I found:** Validation alone wasn't enough, because pydantic ignores unknown keys by default. A misspelled `root_cause` would pass silently. Fixed with `extra="forbid"` and a test.
 - **What `held_back` is for:** Two classes (`tv.streaming`, `security.fraud`) are ignored until activated. In the demo I flip one to `active` and show the system handling a new class live.
 
+## Synthetic KB generation
+- **LLM writes text, code assigns the rest:** The LLM writes titles, symptoms and steps, while code sets IDs, class labels, product and dates. This keeps the data consistent and gives exact ground truth for evals.
+- **Cleaning look-alike characters:** LLMs emit characters like non-breaking hyphens that look normal but aren't. They break keyword search and exact-quote citation checks, so I normalize them to plain ASCII after parsing the JSON.
+- **Caveat:** The KB is plausible but not technically validated against real equipment. The assistant relays what the KB says and doesn't judge whether it is correct.
+
 ## Questions I should be able to answer
 - Why a mock LLM? (Deterministic, free, tests failure modes.)
 - Why not cache failures? (A temporary outage would be stored as a permanent answer.)
 - Why is the data decision a strength? (I checked the data before building on it, and I document what is real and what is synthetic.)
 
 - Why do customer typos matter? (Embeddings handle them fairly well, keyword search doesn't. I'll measure clean vs noisy Recall@5 instead of adding a blind spell-corrector, which could damage error codes.)
+
+## test need 
+A function that silently returns None is a classic bug. The tests caught it within seconds, which is exactly what they are for. If you had skipped running them, the generator would have crashed halfway through 40 API calls.
