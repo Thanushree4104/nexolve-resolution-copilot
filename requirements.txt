@@ -6,3 +6,5 @@ httpx
 pydantic-settings
 datasets
 pandas
+groq
+python-dotenv
