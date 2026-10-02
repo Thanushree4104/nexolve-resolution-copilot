@@ -67,3 +67,15 @@ A support assistant for telecom agents: the agent pastes a customer complaint in
 
 ## test need 
 A function that silently returns None is a classic bug. The tests caught it within seconds, which is exactly what they are for. If you had skipped running them, the generator would have crashed halfway through 40 API calls.
+
+
+## Checking assumptions against data
+- **What happened:** After reading two synthetic tickets, I assumed the `steps_already_tried` field was often wrong, because both complaints mentioned a tried step that the field didn't list.
+- **What I did:** I wrote a small script (`scripts/check_tried_steps.py`) to measure it instead of trusting two samples.
+- **Result:** 141 English complaints mention a tried step, and only 23 of them (16%) have an empty field. The pattern was much smaller than I thought.
+- **Decision:** Keep using the field as a partial ground truth, state the 16% gap in `DATA.md`, and have the parser extract tried steps from the complaint text. Parser tests use hand-written complaints.
+- **Lesson:** Measure before documenting a pattern. A rough check (keyword matching) is still better than a guess, as long as I say it is rough.
+
+## Questions I should be able to answer
+- Why not rely on the `steps_already_tried` field at runtime? (A real system only sees the complaint text, so the parser has to read it from there.)
+- How reliable is the synthetic data? (Mostly consistent, with measured gaps listed in `DATA.md`.)
