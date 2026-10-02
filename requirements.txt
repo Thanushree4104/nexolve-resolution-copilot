@@ -10,3 +10,4 @@ groq
 python-dotenv
 pyyaml
 sentence-transformers
+rank_bm25
