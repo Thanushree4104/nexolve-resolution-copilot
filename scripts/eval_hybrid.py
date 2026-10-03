@@ -89,3 +89,38 @@ for i, order in enumerate(orders["dense"]):
 print("\nMost common dense confusions (true -> predicted):")
 for (t, p), n in conf.most_common(6):
     print(f"  {n:>3}  {t} -> {p}")
+
+print("\nSample hybrid retrieval failures:")
+
+shown = 0
+
+for i, order in enumerate(orders["hybrid"]):
+    expected_kb = tickets[i]["kb_id"]
+    retrieved_ids = [ids[j] for j in order]
+
+    if retrieved_ids[0] != expected_kb:
+        print("\n" + "=" * 80)
+
+        print("TICKET:")
+        print(tickets[i]["complaint"])
+
+        print("\nEXPECTED:")
+        print(
+            f"KB: {expected_kb} | "
+            f"Class: {tickets[i]['class_id']}"
+        )
+
+        print("\nRETRIEVED TOP 5:")
+
+        for rank, j in enumerate(order[:5], start=1):
+            print(
+                f"{rank}. "
+                f"{articles[j]['id']} | "
+                f"{articles[j]['class_id']} | "
+                f"{articles[j]['title']}"
+            )
+
+        shown += 1
+
+        if shown == 10:
+            break
