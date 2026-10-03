@@ -1,16 +1,23 @@
+
 version: 1
 
 products:
-  - Nimbus Fibre        # home broadband
-  - Nimbus ONT-5G       # fibre terminal device
-  - Nimbus Mesh         # Wi-Fi mesh system
-  - Nimbus Mobile       # prepaid and postpaid mobile
-  - Nimbus TV Box       # set-top box
+  - Nimbus Fibre
+  - Nimbus ONT-5G
+  - Nimbus Mesh
+  - Nimbus Mobile
+  - Nimbus TV Box
 
 classes:
   - id: connectivity.intermittent
     name: Intermittent connection
-    description: Internet connects but drops or becomes unstable at times.
+    description: >
+      Use when internet connectivity repeatedly drops, becomes unstable,
+      or disconnects intermittently, but there is no clear evidence that
+      the physical device or equipment is faulty. If the complaint provides
+      evidence of a hardware fault such as overheating, damaged cables or
+      ports, abnormal hardware indicators, or device failure, prefer
+      device.hardware.
     products: [Nimbus Fibre, Nimbus ONT-5G]
     root_causes:
       - evening congestion on the shared node
@@ -19,11 +26,21 @@ classes:
       - Wi-Fi channel interference
     examples:
       - "Internet keeps dropping every night around 8."
+      - "My internet disconnects every few minutes but the router shows no signs of hardware failure."
 
   - id: connectivity.outage
     name: Complete outage
-    description: No internet at all.
-    products: [Nimbus Fibre, Nimbus ONT-5G]
+    description: >
+      Use when the primary customer-facing problem is complete loss of
+      connectivity or service. The service is unavailable, the customer
+      cannot establish a connection, or the Internet is completely down.
+      This category can apply even when the underlying cause is a fibre
+      cut, local node failure, billing suspension, or provisioning error
+      after a plan change. Do not classify an outage as device.hardware
+      solely because the complaint mentions an ONT, router, LEDs, or a
+      missing link light. Prefer device.hardware only when the complaint
+      provides explicit evidence that the physical device itself is faulty.
+
     root_causes:
       - local node failure
       - fibre cut
@@ -34,7 +51,11 @@ classes:
 
   - id: speed.degraded
     name: Slow speeds
-    description: Connection works but speeds are well below the plan.
+    description: >
+      Use when the connection is available but the observed network speed
+      is significantly below the customer's expected or subscribed speed.
+      Do not use this category when the primary problem is complete loss of
+      connectivity or repeated disconnections.
     products: [Nimbus Fibre, Nimbus Mesh]
     root_causes:
       - fair-use throttling after data cap
@@ -46,7 +67,12 @@ classes:
 
   - id: wifi.coverage
     name: Wi-Fi coverage
-    description: Weak or no Wi-Fi in parts of the home.
+    description: >
+      Use when the primary problem is weak, unavailable, or unreliable
+      Wi-Fi coverage in a particular area of the customer's home. Prefer
+      device.hardware when there is clear evidence that the mesh node,
+      router, cable, port, power adapter, or other physical equipment is
+      faulty.
     products: [Nimbus Mesh, Nimbus ONT-5G]
     root_causes:
       - router placement
@@ -58,7 +84,9 @@ classes:
 
   - id: billing.dispute
     name: Billing dispute
-    description: Customer questions a charge or invoice.
+    description: >
+      Use when the customer is questioning, disputing, or reporting an
+      incorrect charge, invoice, fee, or billing amount.
     products: [Nimbus Fibre, Nimbus Mobile]
     root_causes:
       - proration error after plan change
@@ -70,7 +98,18 @@ classes:
 
   - id: account.provisioning
     name: Activation and provisioning
-    description: New service, plan change or number port not completed.
+    description: >
+      Use when the primary issue is an account or service provisioning
+      workflow rather than a normal mobile-service problem. This includes
+      a new Nimbus Fibre service whose activation is pending, queued, or
+      incomplete; a missed installation appointment; a rejected number
+      port-in; or an incorrectly provisioned plan. Do not classify Nimbus
+      Mobile SIM activation, roaming activation, or VoLTE configuration as
+      account.provisioning; those belong to voice.mobile in this taxonomy.
+      Also do not use account.provisioning merely because the complaint
+      mentions provisioning as a possible underlying cause of a complete
+      connectivity outage.
+
     products: [Nimbus Fibre, Nimbus Mobile]
     root_causes:
       - activation stuck in the queue
@@ -79,10 +118,22 @@ classes:
       - installation appointment missed
     examples:
       - "My new connection was supposed to be active three days ago."
+      - "My new mobile plan still shows the old data allowance."
+      - "The installation appointment was missed and my service was never activated."
 
   - id: device.hardware
     name: Device fault
-    description: Router, ONT or other equipment appears faulty.
+    description: >
+      Use when the complaint provides evidence that the physical networking
+      equipment itself is faulty. Strong evidence includes an explicitly
+      reported hardware fault, a device that is dead or unresponsive,
+      repeated abnormal device behavior, overheating, a damaged cable or
+      port, power adapter failure, or persistent hardware-specific failure
+      after normal troubleshooting. Do not classify every outage with an
+      ONT, router, LED, or missing link light as device.hardware. If the
+      complaint primarily describes complete loss of Internet service without
+      establishing a physical hardware fault, use connectivity.outage.
+
     products: [Nimbus ONT-5G, Nimbus Mesh]
     root_causes:
       - ONT hardware fault
@@ -91,10 +142,23 @@ classes:
       - damaged cable or port
     examples:
       - "The router keeps rebooting and feels very hot."
+      - "The ONT lights are off and the device appears to have failed."
+      - "The mesh router is overheating and the cable port looks damaged."
 
   - id: voice.mobile
     name: Mobile voice and data
-    description: Calls, SMS, mobile data or roaming problems.
+    description: >
+      Use for Nimbus Mobile service problems involving calls, SMS, mobile
+      data, SIM registration or activation, VoLTE, roaming, or mobile
+      network availability. In this taxonomy, SIM activation incomplete,
+      roaming not activated, and VoLTE not enabled are classified as
+      voice.mobile even when the complaint uses words such as activation
+      or configuration. Do not route a mobile complaint to
+      account.provisioning merely because activation is mentioned.
+      Use account.provisioning only when the complaint concerns an account
+      or service provisioning workflow such as a wrong plan, number port-in,
+      or a pending Fibre service activation.
+      
     products: [Nimbus Mobile]
     root_causes:
       - VoLTE not enabled on the SIM
@@ -103,6 +167,7 @@ classes:
       - weak coverage at the customer's location
     examples:
       - "I can't make calls indoors."
+      - "My mobile data is not working even though my plan is active."
 
   # Held back: switched on live in the demo to show new classes need no retraining.
   - id: tv.streaming
