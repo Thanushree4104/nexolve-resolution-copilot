@@ -23,7 +23,6 @@ class OutputGuardrail:
     Validates an LLM-generated RAG answer against
     structural and evidence-grounding constraints.
     """
-
     FORBIDDEN_PATTERNS = [
         r"\bI have checked\b",
         r"\bwe have checked\b",
@@ -37,7 +36,32 @@ class OutputGuardrail:
         r"\bwe will perform\b",
         r"\bI will investigate\b",
         r"\bI will perform\b",
-    ]
+
+        # Future-action / commitment claims
+        r"\bI['’]ll\b",
+        r"\bwe['’]ll\b",
+        r"\bI will\b",
+        r"\bwe will\b",
+        r"\bwe are going to\b",
+        r"\bI am going to\b",
+        r"\bwe're going to\b",
+        r"\bI'm going to\b",
+
+        # Claims implying action is being performed
+        r"\bI am checking\b",
+        r"\bwe are checking\b",
+        r"\bI am investigating\b",
+        r"\bwe are investigating\b",
+        r"\bI am performing\b",
+        r"\bwe are performing\b",
+
+        # Promises / follow-up commitments
+        r"\bI['’]ll keep you updated\b",
+        r"\bwe['’]ll keep you updated\b",
+        r"\bI['’]ll let you know\b",
+        r"\bwe['’]ll let you know\b",
+            ]
+    
 
     def validate(
         self,
