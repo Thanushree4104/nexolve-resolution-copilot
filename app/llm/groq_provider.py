@@ -30,7 +30,9 @@ class GroqProvider:
         timeout_s: float = 30.0,
     ):
         if not api_key:
-            raise LLMError("GROQ_API_KEY is not set")
+            raise LLMError(
+                "GROQ_API_KEY is not set"
+            )
 
         self.model = model
 
@@ -42,8 +44,15 @@ class GroqProvider:
         self.max_rate_limit_wait_s = 60.0
         self.max_attempts = 4
 
+    # =========================================================
+    # RETRY HELPERS
+    # =========================================================
+
     @staticmethod
-    def _get_retry_after(error) -> float | None:
+    def _get_retry_after(
+        error,
+    ) -> float | None:
+
         response = getattr(
             error,
             "response",
@@ -75,13 +84,17 @@ class GroqProvider:
                 if value.endswith("ms"):
                     return max(
                         0.0,
-                        float(value[:-2]) / 1000.0,
+                        float(
+                            value[:-2]
+                        ) / 1000.0,
                     )
 
                 if value.endswith("s"):
                     return max(
                         0.0,
-                        float(value[:-1]),
+                        float(
+                            value[:-1]
+                        ),
                     )
 
                 return max(
@@ -89,13 +102,19 @@ class GroqProvider:
                     float(value),
                 )
 
-            except (TypeError, ValueError):
+            except (
+                TypeError,
+                ValueError,
+            ):
                 continue
 
         return None
 
     @staticmethod
-    def _backoff_delay(attempt: int) -> float:
+    def _backoff_delay(
+        attempt: int,
+    ) -> float:
+
         base = min(
             60.0,
             5.0 * (2 ** attempt),
@@ -107,6 +126,10 @@ class GroqProvider:
         )
 
         return base + jitter
+
+    # =========================================================
+    # LLM COMPLETION
+    # =========================================================
 
     def complete(
         self,
@@ -124,10 +147,14 @@ class GroqProvider:
                 "type": "json_object"
             }
 
-        for attempt in range(self.max_attempts):
+        for attempt in range(
+            self.max_attempts
+        ):
+
             start = time.perf_counter()
 
             try:
+
                 logger.info(
                     "llm_request_started",
                     extra={
@@ -173,6 +200,7 @@ class GroqProvider:
                 ).strip()
 
                 if not text:
+
                     logger.error(
                         "llm_empty_response",
                         extra={
@@ -189,7 +217,15 @@ class GroqProvider:
                         "Empty response from LLM"
                     )
 
-                usage = response.usage
+                # -------------------------------------------------
+                # TOKEN USAGE
+                # -------------------------------------------------
+
+                usage = getattr(
+                    response,
+                    "usage",
+                    None,
+                )
 
                 prompt_tokens = getattr(
                     usage,
@@ -226,10 +262,16 @@ class GroqProvider:
                     completion_tokens=completion_tokens,
                 )
 
+            # =====================================================
+            # RATE LIMIT
+            # =====================================================
+
             except RateLimitError as error:
 
-                retry_after = self._get_retry_after(
-                    error
+                retry_after = (
+                    self._get_retry_after(
+                        error
+                    )
                 )
 
                 if retry_after is not None:
@@ -238,6 +280,7 @@ class GroqProvider:
                         retry_after
                         > self.max_rate_limit_wait_s
                     ):
+
                         logger.warning(
                             "llm_rate_limit_unavailable",
                             extra={
@@ -261,6 +304,7 @@ class GroqProvider:
                         attempt
                         == self.max_attempts - 1
                     ):
+
                         logger.error(
                             "llm_rate_limit_exhausted",
                             extra={
@@ -312,6 +356,7 @@ class GroqProvider:
                     attempt
                     == self.max_attempts - 1
                 ):
+
                     logger.error(
                         "llm_rate_limit_exhausted",
                         extra={
@@ -353,12 +398,17 @@ class GroqProvider:
 
                 time.sleep(delay)
 
+            # =====================================================
+            # CONNECTION ERROR
+            # =====================================================
+
             except APIConnectionError as error:
 
                 if (
                     attempt
                     == self.max_attempts - 1
                 ):
+
                     logger.error(
                         "llm_connection_failed",
                         extra={
@@ -399,6 +449,10 @@ class GroqProvider:
 
                 time.sleep(delay)
 
+            # =====================================================
+            # API STATUS ERROR
+            # =====================================================
+
             except APIStatusError as error:
 
                 if error.status_code >= 500:
@@ -407,6 +461,7 @@ class GroqProvider:
                         attempt
                         == self.max_attempts - 1
                     ):
+
                         logger.error(
                             "llm_server_error",
                             extra={
@@ -466,3 +521,8 @@ class GroqProvider:
                 raise LLMError(
                     str(error)
                 ) from error
+
+        raise LLMUnavailableError(
+            "Groq request failed after "
+            f"{self.max_attempts} attempts."
+        )

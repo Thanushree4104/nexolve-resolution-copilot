@@ -4,14 +4,14 @@ import time
 from pathlib import Path
 
 import numpy as np
-from rank_bm25 import BM25Okapi
-from sentence_transformers import SentenceTransformer
+
+from app.services.retriever import HybridRetriever
 
 
 EVAL_PATH = Path("data/eval/retrieval_eval.jsonl")
-KB_PATH = Path("data/synthetic/kb_articles.jsonl")
+OUTPUT_PATH = Path("data/eval/retrieval_results.json")
 
-MODEL = "intfloat/multilingual-e5-small"
+TOP_K = 5
 
 
 def load_jsonl(path):
@@ -20,96 +20,33 @@ def load_jsonl(path):
     with path.open("r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
+
             if line:
                 records.append(json.loads(line))
 
     return records
 
 
-def tokenize(text):
-    import re
-
-    return re.findall(
-        r"\w+",
-        text.lower(),
-        flags=re.UNICODE,
-    )
-
-
-def doc_text(article):
-    title = article.get("title", "")
-    class_id = article.get("class_id", "")
-    product = article.get("product", "")
-    root_cause = article.get("root_cause", "")
-
-    symptoms = " ".join(
-        article.get("symptoms", [])
-    )
-
-    questions = article.get(
-        "diagnostic_questions",
-        [],
-    )
-
-    diagnostic_questions = " ".join(
-        q.get("q", "")
-        for q in questions
-    )
-
-    diagnostic_guidance = " ".join(
-        q.get("if_yes", "")
-        + " "
-        + q.get("if_no", "")
-        for q in questions
-    )
-
-    return (
-        f"Title: {title}. "
-        f"Problem class: {class_id}. "
-        f"Product: {product}. "
-        f"Root cause: {root_cause}. "
-        f"Symptoms: {symptoms}. "
-        f"Diagnostic questions: {diagnostic_questions}. "
-        f"Diagnostic guidance: {diagnostic_guidance}."
-    )
-
-
-def reciprocal_rank_fusion(
-    dense_order,
-    bm25_order,
-    k=60,
+def recall_at_k(
+    ranked_ids,
+    relevant_ids,
+    k,
 ):
-    scores = {}
+    relevant_ids = set(relevant_ids)
 
-    for rank, index in enumerate(dense_order):
-        scores[index] = (
-            scores.get(index, 0.0)
-            + 1.0 / (k + rank + 1)
-        )
-
-    for rank, index in enumerate(bm25_order):
-        scores[index] = (
-            scores.get(index, 0.0)
-            + 1.0 / (k + rank + 1)
-        )
-
-    return sorted(
-        scores,
-        key=scores.get,
-        reverse=True,
-    )
-
-
-def recall_at_k(ranked_ids, relevant_ids, k):
     return float(
         bool(
             set(ranked_ids[:k])
-            & set(relevant_ids)
+            & relevant_ids
         )
     )
 
 
-def hit_at_k(ranked_ids, relevant_ids, k):
+def hit_at_k(
+    ranked_ids,
+    relevant_ids,
+    k,
+):
     return recall_at_k(
         ranked_ids,
         relevant_ids,
@@ -117,7 +54,10 @@ def hit_at_k(ranked_ids, relevant_ids, k):
     )
 
 
-def reciprocal_rank(ranked_ids, relevant_ids):
+def reciprocal_rank(
+    ranked_ids,
+    relevant_ids,
+):
     relevant_ids = set(relevant_ids)
 
     for rank, kb_id in enumerate(
@@ -130,7 +70,11 @@ def reciprocal_rank(ranked_ids, relevant_ids):
     return 0.0
 
 
-def ndcg_at_k(ranked_ids, relevant_ids, k):
+def ndcg_at_k(
+    ranked_ids,
+    relevant_ids,
+    k,
+):
     relevant_ids = set(relevant_ids)
 
     dcg = 0.0
@@ -163,77 +107,107 @@ def ndcg_at_k(ranked_ids, relevant_ids, k):
     return dcg / idcg
 
 
-def evaluate(
-    name,
-    rankings,
-    evaluation,
-    ks=(1, 3, 5),
+def evaluate_query(
+    item,
+    retrieved_ids,
 ):
-    results = []
+    relevant_ids = item["relevant_ids"]
 
-    for item, ranked_indices in zip(
-        evaluation,
-        rankings,
-    ):
-        ranked_ids = [
-            KB_IDS[index]
-            for index in ranked_indices
-        ]
+    return {
+        "ticket_id": item["ticket_id"],
+        "retrieved_ids": retrieved_ids,
+        "relevant_ids": relevant_ids,
 
-        relevant_ids = item["relevant_ids"]
+        "rr": reciprocal_rank(
+            retrieved_ids,
+            relevant_ids,
+        ),
 
-        results.append(
-            {
-                "ticket_id": item["ticket_id"],
-                "retrieved_ids": ranked_ids,
-                "relevant_ids": relevant_ids,
-                "rr": reciprocal_rank(
-                    ranked_ids,
-                    relevant_ids,
-                ),
-                **{
-                    f"recall@{k}": recall_at_k(
-                        ranked_ids,
-                        relevant_ids,
-                        k,
-                    )
-                    for k in ks
-                },
-                **{
-                    f"hit@{k}": hit_at_k(
-                        ranked_ids,
-                        relevant_ids,
-                        k,
-                    )
-                    for k in ks
-                },
-                **{
-                    f"ndcg@{k}": ndcg_at_k(
-                        ranked_ids,
-                        relevant_ids,
-                        k,
-                    )
-                    for k in ks
-                },
-            }
-        )
+        "recall@1": recall_at_k(
+            retrieved_ids,
+            relevant_ids,
+            1,
+        ),
+
+        "recall@3": recall_at_k(
+            retrieved_ids,
+            relevant_ids,
+            3,
+        ),
+
+        "recall@5": recall_at_k(
+            retrieved_ids,
+            relevant_ids,
+            5,
+        ),
+
+        "hit@1": hit_at_k(
+            retrieved_ids,
+            relevant_ids,
+            1,
+        ),
+
+        "hit@3": hit_at_k(
+            retrieved_ids,
+            relevant_ids,
+            3,
+        ),
+
+        "hit@5": hit_at_k(
+            retrieved_ids,
+            relevant_ids,
+            5,
+        ),
+
+        "ndcg@1": ndcg_at_k(
+            retrieved_ids,
+            relevant_ids,
+            1,
+        ),
+
+        "ndcg@3": ndcg_at_k(
+            retrieved_ids,
+            relevant_ids,
+            3,
+        ),
+
+        "ndcg@5": ndcg_at_k(
+            retrieved_ids,
+            relevant_ids,
+            5,
+        ),
+    }
+
+
+def build_summary(results):
+    if not results:
+        return {
+            "retriever": "hybrid",
+            "queries": 0,
+        }
 
     summary = {
-        "retriever": name,
+        "retriever": "hybrid",
         "queries": len(results),
+
         "mrr": float(
             np.mean(
-                [r["rr"] for r in results]
+                [
+                    result["rr"]
+                    for result in results
+                ]
             )
         ),
     }
 
-    for k in ks:
+    for k in (1, 3, 5):
         summary[f"recall@{k}"] = float(
             np.mean(
                 [
-                    r[f"recall@{k}"]
-                    for r in results
+                    result[
+                        f"recall@{k}"
+                    ]
+                    for result in results
                 ]
             )
         )
@@ -241,8 +215,10 @@ def evaluate(
         summary[f"hit@{k}"] = float(
             np.mean(
                 [
-                    r[f"hit@{k}"]
-                    for r in results
+                    result[
+                        f"hit@{k}"
+                    ]
+                    for result in results
                 ]
             )
         )
@@ -250,165 +226,134 @@ def evaluate(
         summary[f"ndcg@{k}"] = float(
             np.mean(
                 [
-                    r[f"ndcg@{k}"]
-                    for r in results
+                    result[
+                        f"ndcg@{k}"
+                    ]
+                    for result in results
                 ]
             )
         )
 
-    return summary, results
+    return summary
 
 
-evaluation = load_jsonl(EVAL_PATH)
-articles = load_jsonl(KB_PATH)
-
-KB_IDS = [
-    article["id"]
-    for article in articles
-]
-
-DOCUMENTS = [
-    doc_text(article)
-    for article in articles
-]
-
-print(f"Evaluation queries : {len(evaluation)}")
-print(f"KB articles        : {len(articles)}")
-print(f"Embedding model    : {MODEL}")
-print()
-
-print("Loading embedding model...")
-model = SentenceTransformer(MODEL)
-
-print("Encoding KB...")
-doc_vectors = model.encode(
-    [
-        "passage: " + text
-        for text in DOCUMENTS
-    ],
-    normalize_embeddings=True,
-    batch_size=32,
-)
-
-bm25 = BM25Okapi(
-    [
-        tokenize(text)
-        for text in DOCUMENTS
-    ]
-)
-
-dense_rankings = []
-bm25_rankings = []
-hybrid_rankings = []
-
-start = time.perf_counter()
-
-for position, item in enumerate(
-    evaluation,
-    start=1,
-):
-    query = item["query"]
-
-    query_vector = model.encode(
-        [
-            "query: " + query
-        ],
-        normalize_embeddings=True,
-    )[0]
-
-    dense_scores = (
-        query_vector
-        @ doc_vectors.T
+def main():
+    evaluation = load_jsonl(
+        EVAL_PATH
     )
 
-    dense_order = np.argsort(
-        -dense_scores
+    print(
+        f"Evaluation queries : "
+        f"{len(evaluation)}"
     )
 
-    query_tokens = tokenize(query)
-
-    bm25_scores = bm25.get_scores(
-        query_tokens
+    print(
+        "Retriever           : "
+        "HybridRetriever "
+        "(production path)"
     )
 
-    bm25_order = np.argsort(
-        -bm25_scores
+    print(
+        f"Embedding model     : "
+        f"intfloat/multilingual-e5-small"
     )
 
-    hybrid_order = reciprocal_rank_fusion(
-        dense_order,
-        bm25_order,
+    print()
+
+    print(
+        "Initializing production "
+        "HybridRetriever..."
     )
 
-    dense_rankings.append(
-        dense_order
-    )
+    retriever = HybridRetriever()
 
-    bm25_rankings.append(
-        bm25_order
-    )
+    print()
 
-    hybrid_rankings.append(
-        hybrid_order
-    )
+    results = []
 
-    if position % 50 == 0:
-        print(
-            f"Processed {position}/"
-            f"{len(evaluation)} queries"
+    start = time.perf_counter()
+
+    for position, item in enumerate(
+        evaluation,
+        start=1,
+    ):
+        query = item["query"]
+
+        retrieval_start = (
+            time.perf_counter()
         )
 
-elapsed = time.perf_counter() - start
+        retrieved = retriever.search(
+            query,
+            top_k=TOP_K,
+        )
 
-print()
-print(
-    f"Retrieval evaluation completed "
-    f"in {elapsed:.2f}s"
-)
-print()
+        retrieval_latency_ms = round(
+            (
+                time.perf_counter()
+                - retrieval_start
+            )
+            * 1000,
+            1,
+        )
 
-dense_summary, dense_results = evaluate(
-    "dense",
-    dense_rankings,
-    evaluation,
-)
+        retrieved_ids = [
+            result["id"]
+            for result in retrieved
+        ]
 
-bm25_summary, bm25_results = evaluate(
-    "bm25",
-    bm25_rankings,
-    evaluation,
-)
+        result = evaluate_query(
+            item,
+            retrieved_ids,
+        )
 
-hybrid_summary, hybrid_results = evaluate(
-    "hybrid",
-    hybrid_rankings,
-    evaluation,
-)
+        result[
+            "retrieval_latency_ms"
+        ] = retrieval_latency_ms
 
-summaries = [
-    dense_summary,
-    bm25_summary,
-    hybrid_summary,
-]
+        results.append(result)
 
-print("=" * 90)
-print("RETRIEVAL EVALUATION")
-print("=" * 90)
+        if position % 50 == 0:
+            print(
+                f"Processed {position}/"
+                f"{len(evaluation)} queries"
+            )
 
-print(
-    f"{'Retriever':<12}"
-    f"{'R@1':>10}"
-    f"{'R@3':>10}"
-    f"{'R@5':>10}"
-    f"{'MRR':>10}"
-    f"{'nDCG@5':>12}"
-)
+    elapsed = (
+        time.perf_counter()
+        - start
+    )
 
-print("-" * 90)
+    summary = build_summary(
+        results
+    )
 
-for summary in summaries:
+    print()
+
     print(
-        f"{summary['retriever']:<12}"
+        f"Retrieval evaluation completed "
+        f"in {elapsed:.2f}s"
+    )
+
+    print()
+
+    print("=" * 90)
+    print("RETRIEVAL EVALUATION")
+    print("=" * 90)
+
+    print(
+        f"{'Retriever':<12}"
+        f"{'R@1':>10}"
+        f"{'R@3':>10}"
+        f"{'R@5':>10}"
+        f"{'MRR':>10}"
+        f"{'nDCG@5':>12}"
+    )
+
+    print("-" * 90)
+
+    print(
+        f"{'hybrid':<12}"
         f"{summary['recall@1']:>10.4f}"
         f"{summary['recall@3']:>10.4f}"
         f"{summary['recall@5']:>10.4f}"
@@ -416,36 +361,46 @@ for summary in summaries:
         f"{summary['ndcg@5']:>12.4f}"
     )
 
-print("=" * 90)
+    print("=" * 90)
 
-output = {
-    "evaluation_dataset": str(EVAL_PATH),
-    "kb_path": str(KB_PATH),
-    "model": MODEL,
-    "query_count": len(evaluation),
-    "kb_count": len(articles),
-    "summaries": summaries,
-    "per_query": {
-        "dense": dense_results,
-        "bm25": bm25_results,
-        "hybrid": hybrid_results,
-    },
-}
+    output = {
+        "evaluation_dataset": str(
+            EVAL_PATH
+        ),
+        "retriever": (
+            "app.services.retriever."
+            "HybridRetriever"
+        ),
+        "retrieval_path": (
+            "production"
+        ),
+        "top_k": TOP_K,
+        "query_count": len(evaluation),
+        "summary": summary,
+        "per_query": results,
+    }
 
-output_path = Path(
-    "data/eval/retrieval_results.json"
-)
+    OUTPUT_PATH.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
 
-output_path.write_text(
-    json.dumps(
-        output,
-        indent=2,
-    ),
-    encoding="utf-8",
-)
+    OUTPUT_PATH.write_text(
+        json.dumps(
+            output,
+            indent=2,
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
 
-print()
-print(
-    f"Detailed results written to: "
-    f"{output_path}"
-)
+    print()
+
+    print(
+        f"Detailed results written to: "
+        f"{OUTPUT_PATH}"
+    )
+
+
+if __name__ == "__main__":
+    main()

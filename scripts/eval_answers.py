@@ -1,245 +1,607 @@
 import json
-import re
+import os
 import time
 from pathlib import Path
 
-from app.services.retriever import HybridRetriever
-from app.services.rag_answer import RAGAnswerService
 from app.llm.factory import get_provider
+from app.services.citation_validator import CitationValidator
+from app.services.rag_answer import RAGAnswerService
+from app.services.retriever import HybridRetriever
 
 
-EVAL_FILE = Path("data/eval/retrieval_eval.jsonl")
-OUTPUT_FILE = Path("data/eval/answer_results.jsonl")
+EVAL_PATH = Path(
+    "data/eval/retrieval_eval.jsonl"
+)
 
-EVAL_LIMIT = 5
+KB_PATH = Path(
+    "data/synthetic/kb_articles.jsonl"
+)
+
+OUTPUT_PATH = Path(
+    "data/eval/answer_results.jsonl"
+)
+
+MODEL = "intfloat/multilingual-e5-small"
 
 
 def load_jsonl(path):
-    with path.open("r", encoding="utf-8") as f:
-        return [
-            json.loads(line)
-            for line in f
-            if line.strip()
-        ]
+    records = []
+
+    with path.open(
+        "r",
+        encoding="utf-8",
+    ) as f:
+        for line in f:
+            line = line.strip()
+
+            if line:
+                records.append(
+                    json.loads(line)
+                )
+
+    return records
 
 
-def classify_error(error):
-    if not error:
-        return "success"
+def get_eval_limit():
+    value = os.getenv(
+        "EVAL_LIMIT",
+        "",
+    ).strip()
 
-    error_lower = error.lower()
+    if not value:
+        return None
+
+    try:
+        limit = int(value)
+
+        if limit <= 0:
+            return None
+
+        return limit
+
+    except ValueError:
+        print(
+            f"WARNING: Invalid EVAL_LIMIT={value!r}. "
+            "Using all queries."
+        )
+        return None
+
+
+def get_provider_name():
+    return os.getenv(
+        "LLM_PROVIDER",
+        "mock",
+    ).lower().strip()
+
+
+def validate_provider_configuration():
+    provider = get_provider_name()
+
+    if provider != "groq":
+        raise RuntimeError(
+            "Answer evaluation must use Groq.\n\n"
+            f"Current LLM_PROVIDER={provider!r}\n\n"
+            "Set it before running evaluation:\n"
+            '  $env:LLM_PROVIDER="groq"\n\n'
+            "Then run:\n"
+            "  python -m scripts.eval_answers"
+        )
+
+
+def get_error_type(error):
+    text = str(error).lower()
 
     if (
-        "rate limit" in error_lower
-        or "rate_limit" in error_lower
-        or "429" in error_lower
+        "rate limit" in text
+        or "429" in text
+        or "too many requests" in text
     ):
-        return "llm_rate_limit"
+        return "rate_limit"
 
-    if "guardrail" in error_lower:
-        return "guardrail_failure"
+    if (
+        "unavailable" in text
+        or "connection" in text
+        or "timeout" in text
+    ):
+        return "unavailable"
 
-    if "citation validation" in error_lower:
-        return "citation_failure"
-
-    if "retrieval" in error_lower:
-        return "retrieval_failure"
-
-    return "other_error"
+    return "other"
 
 
-def citation_count(answer):
+def count_citations(answer):
     if not answer:
         return 0
 
-    return len(
-        re.findall(
-            r"\[KB-[A-Za-z0-9_-]+\]",
-            answer,
-        )
+    import re
+
+    matches = re.findall(
+        r"\[KB-[A-Za-z0-9_-]+\]",
+        answer,
     )
 
+    return len(matches)
 
-def answer_word_count(answer):
-    if not answer:
-        return 0
 
-    return len(
-        re.findall(
-            r"\b\w+\b",
-            answer,
-            flags=re.UNICODE,
-        )
+def get_retrieved_ids(
+    retriever,
+    query,
+    top_k=5,
+):
+    """
+    Retrieve documents using the production retriever.
+
+    search_all() is used when available because the
+    evaluation needs dense/BM25/hybrid rankings.
+    """
+
+    result = retriever.search_all(
+        query,
+        top_k=top_k,
     )
 
+    hybrid = result.get(
+        "hybrid",
+        [],
+    )
 
-def hit_at_k(retrieved_ids, relevant_ids, k):
-    retrieved = set(retrieved_ids[:k])
-    relevant = set(relevant_ids)
-
-    return bool(retrieved & relevant)
-
-
-def reciprocal_rank(retrieved_ids, relevant_ids):
-    relevant = set(relevant_ids)
-
-    for rank, kb_id in enumerate(
-        retrieved_ids,
-        start=1,
-    ):
-        if kb_id in relevant:
-            return round(1.0 / rank, 4)
-
-    return 0.0
+    return hybrid
 
 
 def main():
-    evaluation_data = load_jsonl(
-        EVAL_FILE
-    )[:EVAL_LIMIT]
+    validate_provider_configuration()
 
-    retriever = HybridRetriever()
-    provider = get_provider()
-
-    service = RAGAnswerService(
-        provider=provider,
-        retriever=retriever,
-        max_articles=3,
+    evaluation = load_jsonl(
+        EVAL_PATH
     )
 
-    OUTPUT_FILE.parent.mkdir(
+    kb_articles = load_jsonl(
+        KB_PATH
+    )
+
+    eval_limit = get_eval_limit()
+
+    if eval_limit is not None:
+        evaluation = evaluation[
+            :eval_limit
+        ]
+
+    provider_name = get_provider_name()
+
+    print(
+        "=" * 70
+    )
+    print(
+        "ANSWER EVALUATION CONFIGURATION"
+    )
+    print(
+        "=" * 70
+    )
+
+    print(
+        f"Provider                : "
+        f"{provider_name}"
+    )
+
+    print(
+        f"Evaluation limit        : "
+        f"{eval_limit if eval_limit else 'ALL'}"
+    )
+
+    print(
+        f"Evaluation queries      : "
+        f"{len(evaluation)}"
+    )
+
+    print(
+        f"Evaluation file         : "
+        f"{EVAL_PATH}"
+    )
+
+    print(
+        f"Output file             : "
+        f"{OUTPUT_PATH}"
+    )
+
+    print(
+        "Mode                    : GROQ / REAL LLM"
+    )
+
+    print(
+        "=" * 70
+    )
+
+    print()
+    print(
+        "Initializing shared "
+        "HybridRetriever..."
+    )
+
+    retriever = HybridRetriever(
+        kb_path=str(KB_PATH),
+        model_name=MODEL,
+    )
+
+    print(
+        "Initializing provider: groq"
+    )
+
+    provider = get_provider()
+
+    rag_service = RAGAnswerService(
+        provider=provider,
+        retriever=retriever,
+        max_articles=2,
+    )
+
+    # Citation validator used by the RAG service.
+    citation_validator = CitationValidator()
+
+    OUTPUT_PATH.parent.mkdir(
         parents=True,
         exist_ok=True,
     )
 
-    results = []
-
-    total = len(evaluation_data)
-
-    for index, item in enumerate(
-        evaluation_data,
-        start=1,
-    ):
-        ticket_id = item["ticket_id"]
-        query = item["query"]
-
-        relevant_ids = set(
-            item["relevant_ids"]
-        )
-
-        print(
-            f"[{index}/{total}] {ticket_id}"
-        )
-
-        start = time.perf_counter()
-
-        answer = ""
-        error = None
-
-        try:
-            answer = service.answer(query)
-
-        except Exception as exc:
-            error = str(exc)
-
-            print(
-                f"  ERROR: {error}"
-            )
-
-        latency_ms = round(
-            (
-                time.perf_counter()
-                - start
-            )
-            * 1000,
-            1,
-        )
-
-        # Retrieve independently so that
-        # retrieval quality can be evaluated
-        # even when answer generation fails.
-        try:
-            retrieved = retriever.search(
-                query,
-                top_k=3,
-            )
-
-            retrieved_ids = [
-                article["id"]
-                for article in retrieved
-            ]
-
-        except Exception as exc:
-            retrieved_ids = []
-
-            if error is None:
-                error = (
-                    "retrieval_error: "
-                    + str(exc)
-                )
-
-        status = classify_error(error)
-
-        r1 = hit_at_k(
-            retrieved_ids,
-            relevant_ids,
-            1,
-        )
-
-        r3 = hit_at_k(
-            retrieved_ids,
-            relevant_ids,
-            3,
-        )
-
-        rr = reciprocal_rank(
-            retrieved_ids,
-            relevant_ids,
-        )
-
-        citations = citation_count(
-            answer
-        )
-
-        words = answer_word_count(
-            answer
-        )
-
-        results.append(
-            {
-                "ticket_id": ticket_id,
-                "query": query,
-                "relevant_ids": sorted(
-                    relevant_ids
-                ),
-                "retrieved_ids": retrieved_ids,
-
-                # Retrieval diagnostics
-                "retrieval_hit@1": r1,
-                "retrieval_hit@3": r3,
-                "retrieval_rr": rr,
-
-                # Answer diagnostics
-                "answer": answer,
-                "answer_available": bool(
-                    answer.strip()
-                ),
-                "answer_word_count": words,
-                "citation_count": citations,
-
-                # Execution diagnostics
-                "error": error,
-                "status": status,
-                "latency_ms": latency_ms,
-            }
-        )
-
-    with OUTPUT_FILE.open(
+    # Start a fresh output file for this evaluation.
+    with OUTPUT_PATH.open(
         "w",
         encoding="utf-8",
-    ) as f:
-        for result in results:
-            f.write(
+    ) as output_file:
+
+        attempted = 0
+        answers_generated = 0
+        successful_pipeline = 0
+
+        guardrail_failures = 0
+        citation_failures = 0
+        rate_limit_failures = 0
+        llm_unavailable = 0
+        llm_empty = 0
+        retrieval_failures = 0
+        other_errors = 0
+
+        total_answer_words = 0
+        total_retrieval_latency = 0.0
+        total_answer_latency = 0.0
+
+        for position, item in enumerate(
+            evaluation,
+            start=1,
+        ):
+            attempted += 1
+
+            ticket_id = item[
+                "ticket_id"
+            ]
+
+            complaint = item[
+                "query"
+            ]
+
+            expected_ids = item.get(
+                "relevant_ids",
+                [],
+            )
+
+            print(
+                f"[{position}/{len(evaluation)}] "
+                f"{ticket_id}"
+            )
+
+            result = {
+                "ticket_id": ticket_id,
+                "query": complaint,
+                "relevant_ids": expected_ids,
+                "retrieved_ids": [],
+                "retrieval_hit@1": False,
+                "retrieval_hit@3": False,
+                "retrieval_rr": 0.0,
+                "answer": "",
+                "answer_available": False,
+                "answer_word_count": 0,
+                "citation_count": 0,
+                "error": None,
+                "status": "unknown",
+                "retrieval_latency_ms": 0.0,
+                "answer_latency_ms": 0.0,
+                "latency_ms": 0.0,
+            }
+
+            overall_start = time.perf_counter()
+
+            # -------------------------------------------------
+            # RETRIEVAL
+            # -------------------------------------------------
+
+            retrieval_start = time.perf_counter()
+
+            try:
+                retrieved_ids = get_retrieved_ids(
+                    retriever,
+                    complaint,
+                    top_k=len(kb_articles),
+                )
+
+                result[
+                    "retrieved_ids"
+                ] = retrieved_ids
+
+                if expected_ids:
+                    result[
+                        "retrieval_hit@1"
+                    ] = bool(
+                        set(
+                            retrieved_ids[:1]
+                        )
+                        & set(expected_ids)
+                    )
+
+                    result[
+                        "retrieval_hit@3"
+                    ] = bool(
+                        set(
+                            retrieved_ids[:3]
+                        )
+                        & set(expected_ids)
+                    )
+
+                    rr = 0.0
+
+                    for rank, kb_id in enumerate(
+                        retrieved_ids,
+                        start=1,
+                    ):
+                        if kb_id in expected_ids:
+                            rr = 1.0 / rank
+                            break
+
+                    result[
+                        "retrieval_rr"
+                    ] = rr
+
+            except Exception as error:
+                retrieval_failures += 1
+
+                result[
+                    "status"
+                ] = "retrieval_failure"
+
+                result[
+                    "error"
+                ] = (
+                    "Retrieval failed: "
+                    + str(error)
+                )
+
+                result[
+                    "retrieval_latency_ms"
+                ] = round(
+                    (
+                        time.perf_counter()
+                        - retrieval_start
+                    )
+                    * 1000,
+                    1,
+                )
+
+                result[
+                    "latency_ms"
+                ] = round(
+                    (
+                        time.perf_counter()
+                        - overall_start
+                    )
+                    * 1000,
+                    1,
+                )
+
+                output_file.write(
+                    json.dumps(
+                        result,
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+
+                continue
+
+            result[
+                "retrieval_latency_ms"
+            ] = round(
+                (
+                    time.perf_counter()
+                    - retrieval_start
+                )
+                * 1000,
+                1,
+            )
+
+            total_retrieval_latency += (
+                result[
+                    "retrieval_latency_ms"
+                ]
+            )
+
+            # -------------------------------------------------
+            # ANSWER GENERATION
+            # -------------------------------------------------
+
+            answer_start = time.perf_counter()
+
+            try:
+                answer = rag_service.answer(
+                    complaint
+                )
+
+                if answer is None:
+                    answer = ""
+
+                answer = str(
+                    answer
+                ).strip()
+
+                result[
+                    "answer"
+                ] = answer
+
+                result[
+                    "answer_available"
+                ] = bool(answer)
+
+                result[
+                    "answer_word_count"
+                ] = len(
+                    answer.split()
+                )
+
+                result[
+                    "citation_count"
+                ] = count_citations(
+                    answer
+                )
+
+                if not answer:
+                    llm_empty += 1
+
+                    result[
+                        "status"
+                    ] = "llm_empty"
+
+                    result[
+                        "error"
+                    ] = (
+                        "LLM returned an empty "
+                        "answer."
+                    )
+
+                else:
+                    answers_generated += 1
+
+                    total_answer_words += (
+                        result[
+                            "answer_word_count"
+                        ]
+                    )
+
+                    # -----------------------------------------
+                    # CITATION VALIDATION
+                    # -----------------------------------------
+
+                    try:
+                        validation = (
+                            citation_validator.validate(
+                                answer
+                            )
+                        )
+
+                        # Different validator implementations
+                        # may return True/False or an object.
+                        valid = bool(
+                            validation
+                        )
+
+                        if not valid:
+                            citation_failures += 1
+
+                            result[
+                                "status"
+                            ] = (
+                                "citation_failure"
+                            )
+
+                            result[
+                                "error"
+                            ] = (
+                                "Generated answer "
+                                "failed citation "
+                                "validation."
+                            )
+
+                        else:
+                            successful_pipeline += 1
+
+                            result[
+                                "status"
+                            ] = "success"
+
+                    except Exception as validation_error:
+                        citation_failures += 1
+
+                        result[
+                            "status"
+                        ] = (
+                            "citation_failure"
+                        )
+
+                        result[
+                            "error"
+                        ] = (
+                            "Generated answer "
+                            "failed citation "
+                            "validation: "
+                            + str(
+                                validation_error
+                            )
+                        )
+
+            except Exception as error:
+                error_type = get_error_type(
+                    error
+                )
+
+                if error_type == "rate_limit":
+                    rate_limit_failures += 1
+
+                    result[
+                        "status"
+                    ] = "rate_limit"
+
+                elif error_type == "unavailable":
+                    llm_unavailable += 1
+
+                    result[
+                        "status"
+                    ] = "llm_unavailable"
+
+                else:
+                    other_errors += 1
+
+                    result[
+                        "status"
+                    ] = "error"
+
+                result[
+                    "error"
+                ] = str(error)
+
+            result[
+                "answer_latency_ms"
+            ] = round(
+                (
+                    time.perf_counter()
+                    - answer_start
+                )
+                * 1000,
+                1,
+            )
+
+            total_answer_latency += (
+                result[
+                    "answer_latency_ms"
+                ]
+            )
+
+            result[
+                "latency_ms"
+            ] = round(
+                (
+                    time.perf_counter()
+                    - overall_start
+                )
+                * 1000,
+                1,
+            )
+
+            output_file.write(
                 json.dumps(
                     result,
                     ensure_ascii=False,
@@ -247,153 +609,183 @@ def main():
                 + "\n"
             )
 
-    # --------------------------------------------------
-    # Summary
-    # --------------------------------------------------
+            output_file.flush()
 
-    successful = sum(
-        result["status"] == "success"
-        for result in results
+    # ---------------------------------------------------------
+    # SUMMARY
+    # ---------------------------------------------------------
+
+    query_count = len(
+        evaluation
     )
-
-    answers_available = sum(
-        result["answer_available"]
-        for result in results
-    )
-
-    guardrail_failures = sum(
-        result["status"]
-        == "guardrail_failure"
-        for result in results
-    )
-
-    citation_failures = sum(
-        result["status"]
-        == "citation_failure"
-        for result in results
-    )
-
-    rate_limits = sum(
-        result["status"]
-        == "llm_rate_limit"
-        for result in results
-    )
-
-    retrieval_failures = sum(
-        result["status"]
-        == "retrieval_failure"
-        for result in results
-    )
-
-    other_errors = sum(
-        result["status"]
-        == "other_error"
-        for result in results
-    )
-
-    retrieval_hit1 = sum(
-        result["retrieval_hit@1"]
-        for result in results
-    )
-
-    retrieval_hit3 = sum(
-        result["retrieval_hit@3"]
-        for result in results
-    )
-
-    mean_rr = (
-        sum(
-            result["retrieval_rr"]
-            for result in results
-        )
-        / len(results)
-        if results
-        else 0.0
-    )
-
-    generated_results = [
-        result
-        for result in results
-        if result["answer_available"]
-    ]
 
     mean_answer_words = (
-        sum(
-            result["answer_word_count"]
-            for result in generated_results
-        )
-        / len(generated_results)
-        if generated_results
+        total_answer_words
+        / answers_generated
+        if answers_generated
         else 0.0
     )
 
-    citation_presence = (
-        sum(
-            result["citation_count"] > 0
-            for result in generated_results
-        )
-        / len(generated_results)
-        if generated_results
+    mean_retrieval_latency = (
+        total_retrieval_latency
+        / attempted
+        if attempted
         else 0.0
     )
+
+    mean_answer_latency = (
+        total_answer_latency
+        / attempted
+        if attempted
+        else 0.0
+    )
+
+    citation_presence_rate = 0.0
+
+    if answers_generated:
+        citation_presence_rate = (
+            sum(
+                1
+                for line in OUTPUT_PATH.read_text(
+                    encoding="utf-8"
+                ).splitlines()
+                if line.strip()
+                and json.loads(line).get(
+                    "citation_count",
+                    0,
+                )
+                > 0
+            )
+            / answers_generated
+        )
+
+    retrieval_hit_1 = []
+    retrieval_hit_3 = []
+    retrieval_rr = []
+
+    for line in OUTPUT_PATH.read_text(
+        encoding="utf-8"
+    ).splitlines():
+
+        if not line.strip():
+            continue
+
+        item = json.loads(line)
+
+        retrieval_hit_1.append(
+            float(
+                item.get(
+                    "retrieval_hit@1",
+                    False,
+                )
+            )
+        )
+
+        retrieval_hit_3.append(
+            float(
+                item.get(
+                    "retrieval_hit@3",
+                    False,
+                )
+            )
+        )
+
+        retrieval_rr.append(
+            float(
+                item.get(
+                    "retrieval_rr",
+                    0.0,
+                )
+            )
+        )
 
     print()
-    print("=" * 70)
-    print("ANSWER EVALUATION")
-    print("=" * 70)
-
     print(
-        f"Queries attempted       : {len(results)}"
+        "=" * 70
+    )
+    print(
+        "ANSWER EVALUATION"
+    )
+    print(
+        "=" * 70
     )
 
     print(
-        f"Answers generated       : {answers_available}"
+        f"Provider                : "
+        f"{provider_name}"
     )
 
     print(
-        f"Successful pipeline     : {successful}"
+        f"Queries attempted       : "
+        f"{attempted}"
     )
 
     print(
-        f"Guardrail failures      : {guardrail_failures}"
+        f"Answers generated       : "
+        f"{answers_generated}"
     )
 
     print(
-        f"Citation failures       : {citation_failures}"
+        f"Successful pipeline     : "
+        f"{successful_pipeline}"
     )
 
     print(
-        f"LLM rate-limit failures : {rate_limits}"
+        f"Guardrail failures      : "
+        f"{guardrail_failures}"
     )
 
     print(
-        f"Retrieval failures      : {retrieval_failures}"
+        f"Citation failures      : "
+        f"{citation_failures}"
     )
 
     print(
-        f"Other errors            : {other_errors}"
-    )
-
-    print("-" * 70)
-
-    print(
-        f"Retrieval Hit@1         : "
-        f"{retrieval_hit1 / len(results):.4f}"
-        if results
-        else "Retrieval Hit@1         : 0.0000"
+        f"LLM rate-limit failures : "
+        f"{rate_limit_failures}"
     )
 
     print(
-        f"Retrieval Hit@3         : "
-        f"{retrieval_hit3 / len(results):.4f}"
-        if results
-        else "Retrieval Hit@3         : 0.0000"
+        f"LLM unavailable         : "
+        f"{llm_unavailable}"
     )
 
     print(
-        f"Retrieval MRR           : "
-        f"{mean_rr:.4f}"
+        f"LLM empty responses     : "
+        f"{llm_empty}"
     )
+
+    print(
+        f"Retrieval failures      : "
+        f"{retrieval_failures}"
+    )
+
+    print(
+        f"Other errors            : "
+        f"{other_errors}"
+    )
+
+    print(
+        "-" * 70
+    )
+
+    if retrieval_hit_1:
+        print(
+            f"Retrieval Hit@1         : "
+            f"{np_mean(retrieval_hit_1):.4f}"
+        )
+
+    if retrieval_hit_3:
+        print(
+            f"Retrieval Hit@3         : "
+            f"{np_mean(retrieval_hit_3):.4f}"
+        )
+
+    if retrieval_rr:
+        print(
+            f"Retrieval MRR           : "
+            f"{np_mean(retrieval_rr):.4f}"
+        )
 
     print(
         f"Mean answer words       : "
@@ -402,14 +794,33 @@ def main():
 
     print(
         f"Citation presence rate  : "
-        f"{citation_presence:.4f}"
+        f"{citation_presence_rate:.4f}"
     )
-
-    print("=" * 70)
 
     print(
-        f"Output: {OUTPUT_FILE}"
+        f"Mean retrieval latency  : "
+        f"{mean_retrieval_latency:.1f} ms"
     )
+
+    print(
+        f"Mean answer latency     : "
+        f"{mean_answer_latency:.1f} ms"
+    )
+
+    print(
+        "=" * 70
+    )
+
+    print(
+        f"Output: {OUTPUT_PATH}"
+    )
+
+
+def np_mean(values):
+    if not values:
+        return 0.0
+
+    return sum(values) / len(values)
 
 
 if __name__ == "__main__":

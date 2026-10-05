@@ -3,35 +3,63 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
+REQUIRED_SECTIONS = [
+    "Likely issue:",
+    "Recommended troubleshooting steps:",
+    "Escalation condition:",
+    "Agent response:",
+]
+
+
 @dataclass
 class CitationValidationResult:
     passed: bool
-    citations: list[str] = field(default_factory=list)
-    unsupported_citations: list[str] = field(default_factory=list)
-    uncited_sections: list[str] = field(default_factory=list)
-    unsupported_claims: list[str] = field(default_factory=list)
-    violations: list[str] = field(default_factory=list)
+
+    citations: list[str] = field(
+        default_factory=list
+    )
+
+    unsupported_citations: list[str] = field(
+        default_factory=list
+    )
+
+    uncited_sections: list[str] = field(
+        default_factory=list
+    )
+
+    unsupported_claims: list[str] = field(
+        default_factory=list
+    )
+
+    violations: list[str] = field(
+        default_factory=list
+    )
 
 
 class CitationValidator:
     """
-    Validates citations in RAG-generated answers.
-
-    Expected citation format:
-        [KB-1001]
-
-    Also accepts common LLM variants such as:
-        (KB-1001)
-        KB-1001
-        [KB-1001, KB-1002]
+    Lenient but safe citation validator for RAG answers.
 
     The validator checks:
-    1. Citation IDs exist in the retrieved articles.
-    2. Required answer sections contain citations when they contain
-       KB-derived factual claims.
-    3. Unsupported KB IDs are rejected.
-    4. Citation validation is compatible with the existing RAGAnswerService.
+
+    1. Required logical sections exist.
+    2. KB citations refer to retrieved articles.
+    3. Factual claims in the main KB-derived sections have citations.
+    4. Markdown formatting around headings is tolerated.
+    5. Wrapped lines are treated as part of the same claim.
+    6. Insufficient-evidence statements do not require citations.
+
+    Accepted citation formats:
+
+        [KB-1028]
+        (KB-1028)
+        KB-1028
+        [KB-1028, KB-1029]
     """
+
+    # =========================================================
+    # SECTION DEFINITIONS
+    # =========================================================
 
     REQUIRED_SECTIONS = [
         "Likely issue:",
@@ -40,25 +68,60 @@ class CitationValidator:
         "Agent response:",
     ]
 
-    # Citation formats accepted from LLM output.
+    # More tolerant section matcher.
+    #
+    # Accepts:
+    #
+    # Likely issue:
+    # Likely issue :
+    # ## Likely issue:
+    # **Likely issue:**
+    # ### Recommended troubleshooting steps:
+    #
+    SECTION_HEADER_PATTERN = re.compile(
+        r"""
+        ^\s*
+        (?:[#>*\-\s]*)?
+        (?:\*\*)?
+        (?P<section>
+            Likely\s+issue
+            |
+            Recommended\s+troubleshooting\s+steps
+            |
+            Escalation\s+condition
+            |
+            Agent\s+response
+        )
+        \s*
+        :?
+        \s*
+        (?:\*\*)?
+        \s*$
+        """,
+        re.IGNORECASE | re.MULTILINE | re.VERBOSE,
+    )
+
+    # =========================================================
+    # CITATION PATTERN
+    # =========================================================
+
     CITATION_PATTERN = re.compile(
         r"""
-        (?:
-            \[
-                \s*
+        \[
+            \s*
+            (KB-\d+)
+            (?:
+                \s*,\s*
                 (KB-\d+)
-                (?:\s*,\s*KB-\d+)*
-                \s*
-            \]
-        )
+            )*
+            \s*
+        \]
         |
-        (?:
-            \(
-                \s*
-                (KB-\d+)
-                \s*
-            \)
-        )
+        \(
+            \s*
+            (KB-\d+)
+            \s*
+        \)
         |
         (?<![A-Za-z0-9_-])
         (KB-\d+)
@@ -67,18 +130,31 @@ class CitationValidator:
         re.IGNORECASE | re.VERBOSE,
     )
 
-    SECTION_PATTERN = re.compile(
-        r"^(Likely issue|Recommended troubleshooting steps|"
-        r"Escalation condition|Agent response):\s*$",
-        re.IGNORECASE | re.MULTILINE,
-    )
+    # =========================================================
+    # INITIALIZATION
+    # =========================================================
 
-    def __init__(self, require_section_citations=True):
-        self.require_section_citations = require_section_citations
+    def __init__(
+        self,
+        require_section_citations=False,
+    ):
+        """
+        Section-level citation requirements are intentionally
+        disabled.
 
-    # ---------------------------------------------------------
-    # Public API
-    # ---------------------------------------------------------
+        We validate citations at claim level instead.
+
+        This prevents harmless responses from failing simply
+        because one section contains a general explanation.
+        """
+
+        self.require_section_citations = (
+            require_section_citations
+        )
+
+    # =========================================================
+    # PUBLIC VALIDATION
+    # =========================================================
 
     def validate(
         self,
@@ -87,21 +163,43 @@ class CitationValidator:
         articles: list[dict[str, Any]] | None = None,
     ) -> CitationValidationResult:
 
-        # Support both names so old/new callers work.
         if retrieved_articles is None:
             retrieved_articles = articles or []
 
-        answer = str(answer or "").strip()
+        answer = str(
+            answer or ""
+        ).strip()
 
         if not answer:
+
             return CitationValidationResult(
                 passed=False,
-                violations=["empty_answer"],
+                violations=[
+                    "empty_answer"
+                ],
             )
 
-        allowed_ids = self._get_allowed_ids(retrieved_articles)
+        violations = []
 
-        citations = self._extract_citations(answer)
+        # -----------------------------------------------------
+        # ALLOWED KB IDS
+        # -----------------------------------------------------
+
+        allowed_ids = self._get_allowed_ids(
+            retrieved_articles
+        )
+
+        # -----------------------------------------------------
+        # EXTRACT CITATIONS
+        # -----------------------------------------------------
+
+        citations = self._extract_citations(
+            answer
+        )
+
+        # -----------------------------------------------------
+        # UNSUPPORTED CITATIONS
+        # -----------------------------------------------------
 
         unsupported_citations = [
             citation
@@ -109,108 +207,156 @@ class CitationValidator:
             if citation.upper() not in allowed_ids
         ]
 
-        violations = []
-
-        # -----------------------------------------------------
-        # Unsupported citations
-        # -----------------------------------------------------
-
         for citation in unsupported_citations:
+
             violations.append(
                 f"unsupported_citation:{citation}"
             )
 
         # -----------------------------------------------------
-        # Required section checks
+        # SPLIT INTO SECTIONS
         # -----------------------------------------------------
 
-        sections = self._split_sections(answer)
-
-        if self.require_section_citations:
-            for section_name in [
-                "Likely issue:",
-                "Recommended troubleshooting steps:",
-                "Escalation condition:",
-            ]:
-                content = sections.get(
-                    section_name,
-                    "",
-                ).strip()
-
-                if not content:
-                    continue
-
-                if not self._contains_citation(content):
-                    violations.append(
-                        f"missing_citation:{section_name}"
-                    )
+        sections = self._split_sections(
+            answer
+        )
 
         # -----------------------------------------------------
-        # Detect uncited factual lines
+        # REQUIRED SECTION CHECK
+        # -----------------------------------------------------
+
+        missing_sections = []
+
+        normalized_section_names = {
+            self._normalize_section_name(name)
+            for name in sections
+        }
+
+        for required in self.REQUIRED_SECTIONS:
+
+            normalized_required = (
+                self._normalize_section_name(
+                    required
+                )
+            )
+
+            if (
+                normalized_required
+                not in normalized_section_names
+            ):
+
+                missing_sections.append(
+                    required
+                )
+
+                violations.append(
+                    f"missing_section:{required}"
+                )
+
+        # -----------------------------------------------------
+        # CLAIM VALIDATION
         # -----------------------------------------------------
 
         unsupported_claims = []
 
-        for section_name in [
+        # Agent response is intentionally excluded from
+        # strict claim-level citation checking.
+        #
+        # It is customer-facing conversational text and often
+        # repeats already-cited troubleshooting instructions.
+        #
+        # The KB-derived sections remain citation-validated.
+
+        sections_to_validate = [
             "Likely issue:",
             "Recommended troubleshooting steps:",
             "Escalation condition:",
-        ]:
-            content = sections.get(
+        ]
+
+        for section_name in sections_to_validate:
+
+            content = self._get_section(
+                sections,
                 section_name,
-                "",
-            ).strip()
+            )
 
             if not content:
                 continue
 
-            lines = self._meaningful_lines(content)
+            claims = self._meaningful_lines(
+                content
+            )
 
-            for line in lines:
+            for claim in claims:
 
-                # A line that explicitly says the KB is insufficient
-                # is not treated as a KB-derived factual claim.
-                if self._is_insufficient_evidence_statement(line):
+                # Empty / structural content.
+                if not claim:
                     continue
 
-                # Pure numbering/bullets are still claims if they
-                # contain actual text.
-                if self._contains_citation(line):
+                # Evidence-insufficient statements do not
+                # require citations.
+                if self._is_insufficient_evidence_statement(
+                    claim
+                ):
                     continue
 
-                # Ignore very short structural fragments.
-                if self._is_structural_line(line):
+                # Structural values don't need citations.
+                if self._is_structural_line(
+                    claim
+                ):
+                    continue
+
+                # Citation exists → accepted.
+                if self._contains_citation(
+                    claim
+                ):
                     continue
 
                 unsupported_claims.append(
-                    self._clean_claim(line)
+                    self._clean_claim(
+                        claim
+                    )
                 )
 
+        # -----------------------------------------------------
+        # ADD CLAIM VIOLATIONS
+        # -----------------------------------------------------
+
         for claim in unsupported_claims:
+
             violations.append(
                 f"uncited_claim:{claim}"
             )
 
         # -----------------------------------------------------
-        # Determine final status
+        # FINAL RESULT
         # -----------------------------------------------------
 
-        passed = len(violations) == 0
-
         return CitationValidationResult(
-            passed=passed,
+            passed=len(violations) == 0,
+
             citations=citations,
-            unsupported_citations=unsupported_citations,
-            uncited_sections=self._uncited_sections(
-                sections
+
+            unsupported_citations=(
+                unsupported_citations
             ),
-            unsupported_claims=unsupported_claims,
+
+            uncited_sections=(
+                self._uncited_sections(
+                    sections
+                )
+            ),
+
+            unsupported_claims=(
+                unsupported_claims
+            ),
+
             violations=violations,
         )
 
-    # ---------------------------------------------------------
-    # Allowed KB IDs
-    # ---------------------------------------------------------
+    # =========================================================
+    # ALLOWED IDS
+    # =========================================================
 
     def _get_allowed_ids(
         self,
@@ -219,8 +365,14 @@ class CitationValidator:
 
         allowed = set()
 
-        for article in retrieved_articles or []:
-            if not isinstance(article, dict):
+        for article in (
+            retrieved_articles or []
+        ):
+
+            if not isinstance(
+                article,
+                dict,
+            ):
                 continue
 
             article_id = (
@@ -230,6 +382,7 @@ class CitationValidator:
             )
 
             if article_id:
+
                 allowed.add(
                     str(article_id)
                     .strip()
@@ -238,9 +391,9 @@ class CitationValidator:
 
         return allowed
 
-    # ---------------------------------------------------------
-    # Citation extraction
-    # ---------------------------------------------------------
+    # =========================================================
+    # CITATION EXTRACTION
+    # =========================================================
 
     def _extract_citations(
         self,
@@ -249,22 +402,29 @@ class CitationValidator:
 
         found = []
 
-        for match in self.CITATION_PATTERN.finditer(text):
+        for match in self.CITATION_PATTERN.finditer(
+            text
+        ):
 
-            # Because the regex has multiple groups, take
-            # whichever group matched.
-            groups = match.groups()
+            for group in match.groups():
 
-            for group in groups:
-                if group:
-                    citation = group.upper()
+                if not group:
+                    continue
 
-                    if citation not in found:
-                        found.append(citation)
+                citation = group.upper()
 
-                    break
+                if citation not in found:
+                    found.append(
+                        citation
+                    )
+
+                break
 
         return found
+
+    # =========================================================
+    # CITATION CHECK
+    # =========================================================
 
     def _contains_citation(
         self,
@@ -277,9 +437,9 @@ class CitationValidator:
             )
         )
 
-    # ---------------------------------------------------------
-    # Section parsing
-    # ---------------------------------------------------------
+    # =========================================================
+    # SECTION PARSING
+    # =========================================================
 
     def _split_sections(
         self,
@@ -289,7 +449,7 @@ class CitationValidator:
         sections = {}
 
         matches = list(
-            self.SECTION_PATTERN.finditer(
+            self.SECTION_HEADER_PATTERN.finditer(
                 answer
             )
         )
@@ -297,57 +457,189 @@ class CitationValidator:
         if not matches:
             return sections
 
-        for index, match in enumerate(matches):
+        for index, match in enumerate(
+            matches
+        ):
+
+            raw_name = match.group(
+                "section"
+            )
 
             section_name = (
-                match.group(1).strip()
-                + ":"
+                self._canonical_section_name(
+                    raw_name
+                )
             )
 
             start = match.end()
 
             if index + 1 < len(matches):
-                end = matches[index + 1].start()
+
+                end = matches[
+                    index + 1
+                ].start()
+
             else:
+
                 end = len(answer)
 
             content = answer[
                 start:end
             ].strip()
 
-            sections[section_name] = content
+            sections[
+                section_name
+            ] = content
 
         return sections
 
-    # ---------------------------------------------------------
-    # Claim helpers
-    # ---------------------------------------------------------
+    # =========================================================
+    # SECTION HELPERS
+    # =========================================================
+
+    def _canonical_section_name(
+        self,
+        name: str,
+    ) -> str:
+
+        normalized = (
+            re.sub(
+                r"\s+",
+                " ",
+                name.strip().lower(),
+            )
+        )
+
+        mapping = {
+            "likely issue":
+                "Likely issue:",
+
+            "recommended troubleshooting steps":
+                "Recommended troubleshooting steps:",
+
+            "escalation condition":
+                "Escalation condition:",
+
+            "agent response":
+                "Agent response:",
+        }
+
+        return mapping.get(
+            normalized,
+            name.strip() + ":",
+        )
+
+    def _normalize_section_name(
+        self,
+        name: str,
+    ) -> str:
+
+        return re.sub(
+            r"[^a-z0-9]+",
+            " ",
+            name.lower(),
+        ).strip()
+
+    def _get_section(
+        self,
+        sections: dict[str, str],
+        section_name: str,
+    ) -> str:
+
+        target = self._normalize_section_name(
+            section_name
+        )
+
+        for name, content in sections.items():
+
+            if (
+                self._normalize_section_name(
+                    name
+                )
+                == target
+            ):
+
+                return content
+
+        return ""
+
+    # =========================================================
+    # CLAIM SPLITTING
+    # =========================================================
 
     def _meaningful_lines(
         self,
         content: str,
     ) -> list[str]:
 
-        lines = []
+        claims = []
+
+        current = ""
 
         for raw_line in content.splitlines():
 
             line = raw_line.strip()
 
             if not line:
+
+                if current:
+                    claims.append(
+                        current.strip()
+                    )
+
+                    current = ""
+
                 continue
 
-            # Remove markdown bullets/numbering for analysis.
+            # Detect bullets / numbered items.
+            is_new_item = bool(
+                re.match(
+                    r"^\s*(?:[-*•]|\d+[.)])\s+",
+                    line,
+                )
+            )
+
             cleaned = re.sub(
                 r"^\s*(?:[-*•]|\d+[.)])\s*",
                 "",
                 line,
             ).strip()
 
-            if cleaned:
-                lines.append(cleaned)
+            if not cleaned:
+                continue
 
-        return lines
+            if is_new_item:
+
+                if current:
+                    claims.append(
+                        current.strip()
+                    )
+
+                current = cleaned
+
+            else:
+
+                if current:
+
+                    current += (
+                        " "
+                        + cleaned
+                    )
+
+                else:
+
+                    current = cleaned
+
+        if current:
+            claims.append(
+                current.strip()
+            )
+
+        return claims
+
+    # =========================================================
+    # INSUFFICIENT EVIDENCE
+    # =========================================================
 
     def _is_insufficient_evidence_statement(
         self,
@@ -365,6 +657,11 @@ class CitationValidator:
             "insufficient information",
             "cannot be determined from the available",
             "cannot determine from the available",
+            "cannot be determined using the available",
+            "cannot determine using the available",
+            "not specified in the knowledge base",
+            "not provided in the knowledge base",
+            "the knowledge base does not specify",
         ]
 
         return any(
@@ -372,22 +669,33 @@ class CitationValidator:
             for phrase in phrases
         )
 
+    # =========================================================
+    # STRUCTURAL LINES
+    # =========================================================
+
     def _is_structural_line(
         self,
         line: str,
     ) -> bool:
 
-        normalized = line.strip().lower()
+        normalized = (
+            line.strip().lower()
+        )
 
-        if normalized in {
+        return normalized in {
+            "",
             "none",
             "none provided",
             "n/a",
             "not applicable",
-        }:
-            return True
+            "-",
+            "—",
+            "no information available",
+        }
 
-        return False
+    # =========================================================
+    # CLAIM CLEANING
+    # =========================================================
 
     def _clean_claim(
         self,
@@ -402,9 +710,9 @@ class CitationValidator:
 
         return claim.strip()
 
-    # ---------------------------------------------------------
-    # Diagnostics
-    # ---------------------------------------------------------
+    # =========================================================
+    # DIAGNOSTICS
+    # =========================================================
 
     def _uncited_sections(
         self,
@@ -418,15 +726,25 @@ class CitationValidator:
             "Recommended troubleshooting steps:",
             "Escalation condition:",
         ]:
-            content = sections.get(
+
+            content = self._get_section(
+                sections,
                 section_name,
-                "",
             ).strip()
 
-            if (
+            if not content:
+                continue
+
+            if self._is_insufficient_evidence_statement(
                 content
-                and not self._contains_citation(content)
             ):
-                result.append(section_name)
+                continue
+
+            if not self._contains_citation(
+                content
+            ):
+                result.append(
+                    section_name
+                )
 
         return result

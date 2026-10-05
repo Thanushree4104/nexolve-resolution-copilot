@@ -1,8 +1,11 @@
+import json
 import logging
 import time
 import uuid
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
@@ -13,6 +16,7 @@ from app.core.logging import (
 )
 from app.llm.base import LLMUnavailableError
 from app.llm.factory import get_provider
+from app.services.feedback_reranker import FeedbackStore
 from app.services.rag_answer import RAGAnswerService
 from app.services.retriever import HybridRetriever
 
@@ -22,10 +26,10 @@ setup_logging(settings.log_level)
 logger = logging.getLogger("app")
 
 
-app = FastAPI(
-    title="Nexolve Resolution Copilot",
-    version="1.0.0",
-)
+class FeedbackRequest(BaseModel):
+    query: str
+    kb_id: str
+    feedback: int = Field(..., ge=-1, le=1)
 
 
 class ResolveRequest(BaseModel):
@@ -38,6 +42,26 @@ class ResolveRequest(BaseModel):
 class ResolveResponse(BaseModel):
     complaint: str
     answer: str
+
+
+app = FastAPI(
+    title="Nexolve Resolution Copilot",
+    version="1.0.0",
+)
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 retriever = HybridRetriever()
@@ -63,13 +87,8 @@ async def add_request_id(
 
     trace_id = uuid.uuid4().hex
 
-    request_token = request_id_ctx.set(
-        request_id
-    )
-
-    trace_token = trace_id_ctx.set(
-        trace_id
-    )
+    request_token = request_id_ctx.set(request_id)
+    trace_token = trace_id_ctx.set(trace_id)
 
     start = time.perf_counter()
 
@@ -111,17 +130,36 @@ def health() -> dict:
     }
 
 
+@app.post("/feedback")
+def submit_feedback(
+    request: FeedbackRequest,
+) -> dict:
+    store = FeedbackStore()
+
+    store.add_feedback(
+        query=request.query,
+        kb_id=request.kb_id,
+        feedback=request.feedback,
+    )
+
+    return {
+        "status": "ok",
+        "kb_id": request.kb_id,
+        "feedback": request.feedback,
+    }
+
+
 @app.post(
     "/resolve",
     response_model=ResolveResponse,
 )
 def resolve(
     request: ResolveRequest,
-) -> ResolveResponse:
+) -> JSONResponse:
     start = time.perf_counter()
 
     try:
-        answer = rag_service.answer(
+        result = rag_service.answer(
             request.complaint
         )
 
@@ -157,7 +195,29 @@ def resolve(
         },
     )
 
-    return ResolveResponse(
+    response_data = ResolveResponse(
         complaint=request.complaint,
-        answer=answer,
+        answer=result.answer,
+    )
+
+    # Explicit UTF-8 JSON serialization.
+    #
+    # ensure_ascii=False is important here because it preserves
+    # Unicode characters such as:
+    # - ’ → etc.
+    #
+    # FastAPI/Starlette can otherwise serialize Unicode using
+    # escaped sequences, which makes debugging in some clients
+    # more confusing.
+    body = json.dumps(
+        response_data.model_dump(),
+        ensure_ascii=False,
+    ).encode("utf-8")
+
+    return JSONResponse(
+        content=json.loads(body.decode("utf-8")),
+        status_code=200,
+        headers={
+            "Content-Type": "application/json; charset=utf-8",
+        },
     )
