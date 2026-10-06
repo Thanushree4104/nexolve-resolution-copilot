@@ -1,7 +1,16 @@
 # Nexolve Resolution Copilot
 
 <p align="center">
-  <img src="docs/assets/nexolve-banner.svg" alt="Nexolve Resolution Copilot - from complaint to confident next step" width="100%" />
+  <table width="100%" border="0" cellpadding="28" cellspacing="0">
+  <tr>
+    <td bgcolor="#F5F2EA" align="center">
+      <p><strong>NEXOLVE&nbsp; / &nbsp;RESOLUTION COPILOT</strong></p>
+      <h1>From complaint<br />to confident next step</h1>
+      <p>Semantic support guidance grounded in knowledge articles and resolved cases.</p>
+      <p><em>COMPLAINT&nbsp;&nbsp; ───── &nbsp;&nbsp;EVIDENCE&nbsp;&nbsp; ───── &nbsp;&nbsp;RESOLUTION</em></p>
+    </td>
+  </tr>
+</table>
 </p>
 
 <p align="center">
@@ -115,29 +124,36 @@ The assistant should prefer a useful abstention over a confident answer without 
 - **Ticket hygiene:** exclude unsuitable historical cases and remove personal information before indexing or using ticket text.
 - **Human review:** agents should verify actions that affect accounts, billing, equipment, or service status.
 
-## Additional exploration
+## Exploration & Production Grade Consideration
 
 The system is designed to evolve as customer language, products, and ticket classes change.
 
-### Retrieval experiments
+## Resolution Design
 
-Compare lexical BM25, semantic similarity, and hybrid retrieval on the same labeled complaint set. Include paraphrases, spelling mistakes, short complaints, and complaints with multiple symptoms. Track which source type—article or historical case—provides the strongest evidence.
+A reliable support assistant needs more than a *retrieve → prompt → LLM* pipeline. Nexolve uses multiple stages to find relevant evidence, protect customer information, account for agent feedback, validate generated guidance, and handle cases where the evidence is not strong enough.
 
-### Feedback-aware ranking
+Hallucinations are controlled through **grounding, validation, and fallback**—rather than assuming the LLM will always be correct.
 
-Use helpful and not-helpful feedback as a ranking signal for semantically similar future queries. Keep this signal bounded: feedback should adjust candidate ordering, not override relevance, source quality, domain scope, or safety rules. Log the ranking version so experiments can be compared and rolled back.
+### Weighted hybrid retrieval
+Nexolve combines dense semantic search with BM25 lexical retrieval. Semantic search can recognize complaints that describe the same fault in different words, while lexical search helps surface exact product names, error messages, and technical terms. Weighted results bring both kinds of matches into the ranking.
 
-### Evolving taxonomy and data
+### Query-aware feedback reranking
+Helpfulness feedback is considered in the context of the current complaint. Feedback from similar past queries can strengthen relevant candidates, while feedback from unrelated issues has less influence. This helps improve ranking without turning globally popular articles into default answers.
 
-Monitor new product names, issue categories, and emerging ticket clusters. Add a controlled ingestion path that validates records, redacts sensitive fields, deduplicates cases, and refreshes indexes. Version the corpus and taxonomy so results can be traced to the data that produced them.
+### PII redaction
+Personal information in ticket data is redacted before it is indexed or used as retrieval context. This reduces the risk of exposing customer details in search results, prompts, logs, or generated responses.
 
-### Out-of-domain and low-evidence behavior
+### Citation validation
+Retrieved source IDs are carried through the generation process. Before an answer is returned, its citations are checked against the sources retrieved for that request. This helps prevent the assistant from citing articles or tickets it did not actually use.
 
-Include deliberate negative examples—such as vehicle repair, medical, or unrelated consumer questions—in evaluation. The expected behavior is to decline domain-specific guidance and avoid displaying unrelated retrieved sources as supporting evidence.
+### RAG guardrails
+The system checks whether the retrieved evidence is relevant and sufficient, then validates the generated response. When an output fails validation, it can attempt a controlled repair. If the evidence still cannot support a safe, specific recommendation, the assistant returns a limited-evidence response instead.
 
-## Evaluation: quality and system health
+### Failure-aware LLM pipeline
+LLM providers can time out, apply rate limits, or become temporarily unavailable. The pipeline handles these failures explicitly and avoids silently presenting unsupported guidance as a successful resolution.
 
-The figures below are taken from the evaluation artifacts in your project folder (data/eval/retrieval_results.json and data/eval/answer_results.jsonl). The retrieval results are a measured run of the project hybrid retriever on its synthetic labeled benchmark; they are not production traffic metrics.
+> **Design principle**  
+> *Redact sensitive data → retrieve broadly → rerank for the current query → generate from retrieved evidence → validate the answer and citations → fall back or abstain when evidence is insufficient.*
 
 ## 📊 Evaluation Results
 
@@ -164,37 +180,6 @@ citation validity.
 > **Note:** Retrieval metrics and citation validity measure different stages of
 > the pipeline and should not be interpreted as a single overall accuracy
 > score.
-
-## Production scale considerations
-
-### ## 🏗️ Production-Grade Resolution Design
-
-A reliable support assistant needs more than a *retrieve → prompt → LLM* pipeline. Nexolve uses multiple stages to find relevant evidence, protect customer information, account for agent feedback, validate generated guidance, and handle cases where the evidence is not strong enough.
-
-### ⚡ Weighted hybrid retrieval
-Nexolve combines dense semantic search with BM25 lexical retrieval. Semantic search can recognize complaints that describe the same fault in different words, while lexical search helps surface exact product names, error messages, and technical terms. Weighted results bring both kinds of matches into the ranking.
-
-### 🔄 Query-aware feedback reranking
-Helpfulness feedback is considered in the context of the current complaint. Feedback from similar past queries can strengthen relevant candidates, while feedback from unrelated issues has less influence. This helps improve ranking without turning globally popular articles into default answers.
-
-### 🎫 Past-ticket retrieval
-Resolved support cases provide a second source of evidence alongside knowledge-base articles. Similar tickets can reveal how related issues were investigated and resolved, while the knowledge base provides reusable support guidance.
-
-### 🔒 PII redaction
-Personal information in ticket data is redacted before it is indexed or used as retrieval context. This reduces the risk of exposing customer details in search results, prompts, logs, or generated responses.
-
-### 🔗 Citation validation
-Retrieved source IDs are carried through the generation process. Before an answer is returned, its citations are checked against the sources retrieved for that request. This helps prevent the assistant from citing articles or tickets it did not actually use.
-
-### 🛡️ RAG guardrails
-The system checks whether the retrieved evidence is relevant and sufficient, then validates the generated response. When an output fails validation, it can attempt a controlled repair. If the evidence still cannot support a safe, specific recommendation, the assistant returns a limited-evidence response instead.
-
-### ⚙️ Failure-aware LLM pipeline
-LLM providers can time out, apply rate limits, or become temporarily unavailable. The pipeline handles these failures explicitly and avoids silently presenting unsupported guidance as a successful resolution.
-
-> **Design principle**  
-> *Redact sensitive data → retrieve broadly → rerank for the current query → generate from retrieved evidence → validate the answer and citations → abstain when evidence is insufficient.*
-
 
 ## Run locally
 
