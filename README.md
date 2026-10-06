@@ -204,7 +204,7 @@ To stop the services with `Ctrl+C`, or run `docker compose down` from the projec
 A customer reports that Wi-Fi connects but internet pages do not load. Nexolve retrieves grounded troubleshooting guidance, cites its knowledge source, and presents escalation conditions and an agent response.
 
 <p align="center">
-  <img src="docs/screenshots/broadband-resolution.png" alt="Broadband complaint and grounded resolution with citations" width="90%" />
+  <img src="docs/broadband-resolution.png" alt="Broadband complaint and grounded resolution with citations" width="90%" />
 </p>
 
 ### Out-of-scope complaint
@@ -212,5 +212,5 @@ A customer reports that Wi-Fi connects but internet pages do not load. Nexolve r
 When a complaint is unrelated to telecom support, Nexolve returns a limited-evidence response instead of presenting unrelated troubleshooting as relevant.
 
 <p align="center">
-  <img src="docs/screenshots/out-of-scope-limited-evidence.png" alt="Out-of-scope complaint handled with a limited-evidence response" width="90%" />
+  <img src="docs/out-of-scope-limited-evidence.png" alt="Out-of-scope complaint handled with a limited-evidence response" width="90%" />
 </p>
