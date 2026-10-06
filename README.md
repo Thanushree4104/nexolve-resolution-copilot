@@ -1,19 +1,6 @@
 # Nexolve Resolution Copilot
 
 <p align="center">
-  <table width="100%" border="0" cellpadding="28" cellspacing="0">
-  <tr>
-    <td bgcolor="#F5F2EA" align="center">
-      <p><strong>NEXOLVE&nbsp; / &nbsp;RESOLUTION COPILOT</strong></p>
-      <h1>From complaint<br />to confident next step</h1>
-      <p>Semantic support guidance grounded in knowledge articles and resolved cases.</p>
-      <p><em>COMPLAINT&nbsp;&nbsp; ───── &nbsp;&nbsp;EVIDENCE&nbsp;&nbsp; ───── &nbsp;&nbsp;RESOLUTION</em></p>
-    </td>
-  </tr>
-</table>
-</p>
-
-<p align="center">
   <img alt="API" src="https://img.shields.io/badge/API-FastAPI-079A82?style=flat-square" />
   <img alt="Frontend" src="https://img.shields.io/badge/UI-React%20%2B%20Vite-5B67E8?style=flat-square" />
   <img alt="Retrieval" src="https://img.shields.io/badge/Retrieval-Semantic%20%2B%20BM25-6941C6?style=flat-square" />
