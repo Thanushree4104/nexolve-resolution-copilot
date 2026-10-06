@@ -1,4 +1,6 @@
+<div align="center">
 # Nexolve Resolution Copilot
+</div>
 
 <p align="center">
   <img alt="API" src="https://img.shields.io/badge/API-FastAPI-079A82?style=flat-square" />
@@ -189,7 +191,6 @@ docker compose up --build
 
 Open **http://localhost:5173**. Stop the services with `Ctrl+C`, or run `docker compose down` from the project directory.
 
-This option requires a `compose.yaml` or `docker-compose.yml` in the repository, configured to expose the frontend on port `5174` and connect it to the API.
 
 ### Option 2: Manual setup
 
