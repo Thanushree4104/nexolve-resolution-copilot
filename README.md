@@ -196,7 +196,8 @@ docker compose up --build
 Open **http://localhost:5173**. 
 
 To stop the services with `Ctrl+C`, or run `docker compose down` from the project directory.
-```
+
+
 ## See Nexolve in action
 
 ### Broadband connectivity resolution
