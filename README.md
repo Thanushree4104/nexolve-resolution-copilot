@@ -123,22 +123,22 @@ A reliable support assistant needs more than a *retrieve → prompt → LLM* pip
 
 Hallucinations are controlled through **grounding, validation, and fallback**—rather than assuming the LLM will always be correct.
 
-### Weighted hybrid retrieval
+### 🔵 Weighted hybrid retrieval
 Nexolve combines dense semantic search with BM25 lexical retrieval. Semantic search can recognize complaints that describe the same fault in different words, while lexical search helps surface exact product names, error messages, and technical terms. Weighted results bring both kinds of matches into the ranking.
 
-### Query-aware feedback reranking
+### 🔵 Query-aware feedback reranking
 Helpfulness feedback is considered in the context of the current complaint. Feedback from similar past queries can strengthen relevant candidates, while feedback from unrelated issues has less influence. This helps improve ranking without turning globally popular articles into default answers.
 
-### PII redaction
+### 🔵 PII redaction
 Personal information in ticket data is redacted before it is indexed or used as retrieval context. This reduces the risk of exposing customer details in search results, prompts, logs, or generated responses.
 
-### Citation validation
+### 🔵 Citation validation
 Retrieved source IDs are carried through the generation process. Before an answer is returned, its citations are checked against the sources retrieved for that request. This helps prevent the assistant from citing articles or tickets it did not actually use.
 
-### RAG guardrails
+### 🔵 RAG guardrails
 The system checks whether the retrieved evidence is relevant and sufficient, then validates the generated response. When an output fails validation, it can attempt a controlled repair. If the evidence still cannot support a safe, specific recommendation, the assistant returns a limited-evidence response instead.
 
-### Failure-aware LLM pipeline
+### 🔵 Failure-aware LLM pipeline
 LLM providers can time out, apply rate limits, or become temporarily unavailable. The pipeline handles these failures explicitly and avoids silently presenting unsupported guidance as a successful resolution.
 
 > **Design principle**  
@@ -172,52 +172,43 @@ citation validity.
 
 ## Run locally
 
-Clone the repository, then choose either Docker or the manual setup.
+Clone the repository
 
 ```powershell
-git clone <your-repository-url>
+git clone https://github.com/Thanushree4104/nexolve-resolution-copilot.git
+cd nexolve-resolution-copilot
+```
+Create a `.env` file from the project’s example, if provided, and add the required LLM credentials. Never commit secrets. [
+```markdown
+## Run locally
+
+Clone the repository:
+
+```powershell
+git clone https://github.com/Thanushree4104/nexolve-resolution-copilot.git
 cd nexolve-resolution-copilot
 ```
 
-Create a `.env` file from the project’s example, if provided, and add the required LLM credentials. Never commit secrets.
+Create a `.env` file in the project root and add your Groq credentials and model settings:
 
-### Option 1: Docker
+```env
+GROQ_API_KEY=your_groq_api_key
+LLM_PROVIDER=groq
+GROQ_MODEL=openai/gpt-oss-120b
+```
 
-Make sure Docker Desktop is running. From the project root, run:
+Replace `your_groq_api_key` with your own API key. Keep `.env` private and never commit it.
+
+Make sure Docker Desktop is running. From the project root, start the application:
 
 ```powershell
 docker compose up --build
 ```
 
-Open **http://localhost:5173**. Stop the services with `Ctrl+C`, or run `docker compose down` from the project directory.
+Open **http://localhost:5173**. 
 
-
-### Option 2: Manual setup
-
-Create and activate a Python virtual environment, then install the backend dependencies:
-
-```powershell
-py -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
+To stop the services with `Ctrl+C`, or run `docker compose down` from the project directory.
 ```
-
-In one terminal, start the API from the project root:
-
-```powershell
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
-```
-
-In a second terminal, start the frontend:
-
-```powershell
-cd frontend
-npm install
-npm run dev -- --port 5173
-```
-
-Open **http://localhost:5173**. Configure the frontend to reach the API at **http://127.0.0.1:8000**. Follow the project files for the required Python version and environment variables.
-shows both source metadata and citations, and helpfulness feedback is accepted.
 
 ---
 
