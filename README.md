@@ -1,6 +1,4 @@
-<div align="center">
-# Nexolve Resolution Copilot
-</div>
+<h1 align="center">Nexolve Resolution Copilot</h1>
 
 <p align="center">
   <img alt="API" src="https://img.shields.io/badge/API-FastAPI-079A82?style=flat-square" />
@@ -117,7 +115,7 @@ The assistant should prefer a useful abstention over a confident answer without 
 
 The system is designed to evolve as customer language, products, and ticket classes change.
 
-## Resolution Design
+### 🔵 Resolution Design
 
 A reliable support assistant needs more than a *retrieve → prompt → LLM* pipeline. Nexolve uses multiple stages to find relevant evidence, protect customer information, account for agent feedback, validate generated guidance, and handle cases where the evidence is not strong enough.
 
@@ -172,16 +170,6 @@ citation validity.
 
 ## Run locally
 
-Clone the repository
-
-```powershell
-git clone https://github.com/Thanushree4104/nexolve-resolution-copilot.git
-cd nexolve-resolution-copilot
-```
-Create a `.env` file from the project’s example, if provided, and add the required LLM credentials. Never commit secrets. [
-```markdown
-## Run locally
-
 Clone the repository:
 
 ```powershell
@@ -209,11 +197,20 @@ Open **http://localhost:5173**.
 
 To stop the services with `Ctrl+C`, or run `docker compose down` from the project directory.
 ```
+## See Nexolve in action
 
----
+### Broadband connectivity resolution
+
+A customer reports that Wi-Fi connects but internet pages do not load. Nexolve retrieves grounded troubleshooting guidance, cites its knowledge source, and presents escalation conditions and an agent response.
 
 <p align="center">
-  <sub>Evidence first. Clear next steps. Better support conversations.</sub>
+  <img src="docs/screenshots/broadband-resolution.png" alt="Broadband complaint and grounded resolution with citations" width="90%" />
 </p>
 
+### Out-of-scope complaint
 
+When a complaint is unrelated to telecom support, Nexolve returns a limited-evidence response instead of presenting unrelated troubleshooting as relevant.
+
+<p align="center">
+  <img src="docs/screenshots/out-of-scope-limited-evidence.png" alt="Out-of-scope complaint handled with a limited-evidence response" width="90%" />
+</p>
