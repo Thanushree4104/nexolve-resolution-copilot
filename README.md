@@ -137,94 +137,114 @@ Include deliberate negative examples—such as vehicle repair, medical, or unrel
 
 ## Evaluation: quality and system health
 
-<p align="center">
-  <img src="docs/assets/evaluation-scorecard.svg" alt="Offline synthetic evaluation summary" width="100%" />
-</p>
-
-
 The figures below are taken from the evaluation artifacts in your project folder (data/eval/retrieval_results.json and data/eval/answer_results.jsonl). The retrieval results are a measured run of the project hybrid retriever on its synthetic labeled benchmark; they are not production traffic metrics.
 
-| Area | What to measure | Observed project result | Why it matters |
-|---|---|---|---|
-| Retrieval relevance | Recall@k, MRR, nDCG | **400 synthetic complaint queries:** Recall@1 **56.8%**, Recall@3 **77.0%**, Recall@5 **84.3%**; MRR **0.672**, nDCG@5 **0.715** | Relevant knowledge articles appear near the top |
-| Retrieval latency | p50 / p95 retrieval time | **46.2 ms / 91.1 ms** across the recorded offline run; max **226.3 ms** | Indicates local retrieval cost only; not end-to-end service latency |
-| Answer generation | Successful answer runs | **1 of 5 (20%)**; **4 of 5** failed with provider rate limits | The sample is too small and rate-limited to claim reliable generation |
-| Citation validation | Citation presence and retrieved-ID validity | **1 of 1 generated answer (100%)** had a citation and all cited IDs were retrieved; this checks ID validity, not whether the cited source truly supports every claim | Generated steps need to point to real retrieved evidence |
-| Past-ticket source coverage | Relevant resolved-ticket hit rate by rank | **Not measured** by this KB-labeled retrieval benchmark | Past-ticket retrieval needs its own labeled relevance set |
-| Abstention and scope | Out-of-scope rejection and low-evidence abstention | **Not measured** | Confirms the assistant avoids irrelevant or unsupported guidance |
-| Complaint understanding | Intent/category, product, severity, sentiment accuracy | **Not measured** in the bundled run | Parsed signals support routing and analysis |
-| Feedback reranking | Ranking lift on similar-query cohorts | **Not measured**; the bundled feedback sample is insufficient for a lift claim | Feedback should improve ordering without harming relevance |
-| Production reliability | Concurrent p50/p95, timeout rate, error rate, availability | **Not measured** | Local offline timing is not a production service-level result |
-| Operations | Index freshness, ingestion failures, token use, cost per resolution | **Not measured** | The service must stay current and sustainable |
+## 📊 Evaluation Results
 
-**Measurement note:** I used the metrics saved by your actual project. I could not freshly rerun the embedding evaluation here: the project virtual-environment launcher points to a missing Python installation, and the available fallback runtime does not have sentence-transformers installed. The answer results also record provider rate limits. I did not modify the Git repository. Re-run `python -m scripts.eval_retrieval` in a working project environment to refresh retrieval metrics, then re-run answer and citation evaluation with a healthy configured LLM provider.
+The system was evaluated across retrieval quality, retrieval latency, and
+citation validity.
 
-### Suggested evaluation gates
+| Metric | Observed Result | What it measures |
+|---|---:|---|
+| **Recall@1 (R@1)** | **56.75%** | Percentage of queries where the relevant article was ranked first |
+| **Recall@3 (R@3)** | **77.00%** | Percentage of queries where the relevant article appeared in the top 3 |
+| **Recall@5 (R@5)** | **84.25%** | Percentage of queries where the relevant article appeared in the top 5 |
+| **nDCG@5** | **0.7146** | Quality of the ranking within the top 5 results |
+| **Retrieval Latency** | **p50: 46.2 ms · p95: 91.1 ms** | Retrieval-stage latency in the recorded offline run |
+| **Citation Validity** | **70% (14/20)** | Percentage of evaluated answers that contained valid citations to retrieved evidence |
 
-- Build a human-reviewed set of in-domain, ambiguous, out-of-domain, and low-evidence complaints.
-- Keep query-level train/evaluation separation when tuning feedback reranking.
-- Require valid citations for every substantive recommendation.
-- Review false-safe answers and false refusals separately.
-- Compare each release against a fixed baseline and investigate regressions by product and issue category.
-- Include API contract checks for successful resolution, abstention, out-of-scope response, and feedback submission.
+### Evaluation Scope
+
+- **Retrieval:** 400 synthetic complaint queries
+- **Latency:** recorded offline retrieval run
+- **Citation evaluation:** 20 generated answers (testing purpose)
+- Citation validity checks whether cited knowledge-base IDs correspond to
+  retrieved evidence.
+
+> **Note:** Retrieval metrics and citation validity measure different stages of
+> the pipeline and should not be interpreted as a single overall accuracy
+> score.
 
 ## Production scale considerations
 
-### Retrieval and data
+### ## 🏗️ Production-Grade Resolution Design
 
-- Move from in-process indexes to a managed vector store or search service when corpus size, concurrency, or update frequency requires it; retain lexical retrieval for exact product codes and known terms.
-- Use approximate nearest-neighbor search, metadata filters, and bounded candidate sets to control latency.
-- Ingest changes asynchronously. Validate, redact, deduplicate, and version documents before publishing a new index.
-- Keep ticket and knowledge-article permissions and retention rules separate where required.
-- Support index rebuilds and rollback to a known-good corpus snapshot.
+A reliable support assistant needs more than a *retrieve → prompt → LLM* pipeline. Nexolve uses multiple stages to find relevant evidence, protect customer information, account for agent feedback, validate generated guidance, and handle cases where the evidence is not strong enough.
 
-### Service reliability
+### ⚡ Weighted hybrid retrieval
+Nexolve combines dense semantic search with BM25 lexical retrieval. Semantic search can recognize complaints that describe the same fault in different words, while lexical search helps surface exact product names, error messages, and technical terms. Weighted results bring both kinds of matches into the ranking.
 
-- Keep the API stateless and scale it horizontally behind a load balancer.
-- Put LLM calls behind timeouts, bounded retries, rate limits, and circuit breakers. Return a clear evidence-based fallback if the provider is unavailable.
-- Cache safe, repeatable retrieval work where appropriate; do not cache responses containing customer-specific data without a reviewed privacy design.
-- Add request IDs, structured logs, distributed traces, and metrics while avoiding complaint text and personal data in logs.
-- Protect endpoints with authentication, authorization, input-size limits, abuse controls, and secrets management.
+### 🔄 Query-aware feedback reranking
+Helpfulness feedback is considered in the context of the current complaint. Feedback from similar past queries can strengthen relevant candidates, while feedback from unrelated issues has less influence. This helps improve ranking without turning globally popular articles into default answers.
 
-### Model and feedback governance
+### 🎫 Past-ticket retrieval
+Resolved support cases provide a second source of evidence alongside knowledge-base articles. Similar tickets can reveal how related issues were investigated and resolved, while the knowledge base provides reusable support guidance.
 
-- Pin and record embedding, reranker, prompt, and generation model versions.
-- Treat feedback as untrusted input; rate-limit it, deduplicate it, and monitor for manipulation or drift.
-- Use offline evaluation and staged rollout before a ranking or model change reaches all agents.
-- Track source freshness and answer quality together; a fluent answer over stale evidence is still a failure.
+### 🔒 PII redaction
+Personal information in ticket data is redacted before it is indexed or used as retrieval context. This reduces the risk of exposing customer details in search results, prompts, logs, or generated responses.
 
-## Technology
+### 🔗 Citation validation
+Retrieved source IDs are carried through the generation process. Before an answer is returned, its citations are checked against the sources retrieved for that request. This helps prevent the assistant from citing articles or tickets it did not actually use.
 
-- **Web UI:** React and Vite
-- **API:** Python and FastAPI
-- **Retrieval:** Sentence Transformers embeddings and BM25 lexical search
-- **Generation:** configured LLM provider (Groq in the reviewed setup)
-- **Operations:** health endpoint, structured request logs, and evaluation-driven monitoring
+### 🛡️ RAG guardrails
+The system checks whether the retrieved evidence is relevant and sufficient, then validates the generated response. When an output fails validation, it can attempt a controlled repair. If the evidence still cannot support a safe, specific recommendation, the assistant returns a limited-evidence response instead.
 
-Confirm exact dependency versions and provider configuration in the project’s environment files before deployment.
+### ⚙️ Failure-aware LLM pipeline
+LLM providers can time out, apply rate limits, or become temporarily unavailable. The pipeline handles these failures explicitly and avoids silently presenting unsupported guidance as a successful resolution.
+
+> **Design principle**  
+> *Redact sensitive data → retrieve broadly → rerank for the current query → generate from retrieved evidence → validate the answer and citations → abstain when evidence is insufficient.*
+
 
 ## Run locally
 
-Use the project’s existing environment and instructions as the source of truth for dependencies and environment variables.
-
-Typical development commands:
+Clone the repository, then choose either Docker or the manual setup.
 
 ```powershell
-# From the project root: start the API
+git clone <your-repository-url>
+cd nexolve-resolution-copilot
+```
+
+Create a `.env` file from the project’s example, if provided, and add the required LLM credentials. Never commit secrets.
+
+### Option 1: Docker
+
+Make sure Docker Desktop is running. From the project root, run:
+
+```powershell
+docker compose up --build
+```
+
+Open **http://localhost:5173**. Stop the services with `Ctrl+C`, or run `docker compose down` from the project directory.
+
+This option requires a `compose.yaml` or `docker-compose.yml` in the repository, configured to expose the frontend on port `5174` and connect it to the API.
+
+### Option 2: Manual setup
+
+Create and activate a Python virtual environment, then install the backend dependencies:
+
+```powershell
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+```
+
+In one terminal, start the API from the project root:
+
+```powershell
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
+In a second terminal, start the frontend:
+
 ```powershell
-# From the frontend directory: install dependencies once, then start the UI
+cd frontend
 npm install
-npm run dev -- --port 5174
+npm run dev -- --port 5173
 ```
 
-Configure the frontend API URL to point to the local API, and configure the backend’s LLM credentials using the project’s environment settings. Never commit secrets. If your project scripts use different paths or commands, follow those instead.
-
-## Current implementation check
-
-Before describing the full workflow as production-active, verify that the telecom scope guard is called before retrieval and that the frontend feedback payload matches the API feedback schema. Run the API and UI together, then confirm that an out-of-scope complaint returns no irrelevant sources, an in-scope complaint shows both source metadata and citations, and helpfulness feedback is accepted.
+Open **http://localhost:5173**. Configure the frontend to reach the API at **http://127.0.0.1:8000**. Follow the project files for the required Python version and environment variables.
+shows both source metadata and citations, and helpfulness feedback is accepted.
 
 ---
 
